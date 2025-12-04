@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en" dir="auto">
+<head>
+  <meta charset="UTF-8" />
+  <title>Invoice Formatter - Static Version</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0b0c10;
+      --panel: #12151a;
+      --muted: #9aa4b2;
+      --fg: #e7ecf3;
+      --accent: #1c7ed6;
+      --accent-2: #339af0;
+      --border: #2a2f37;
+      --good: #2fb344;
+      --warn: #f08c00;
+      --bad: #e03131;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f8fa;
+        --panel: #ffffff;
+        --fg: #111;
+        --muted: #667085;
+        --accent: #1971c2;
+        --accent-2: #1c7ed6;
+        --border: #e5e7eb;
+        --good: #2b8a3e;
+        --warn: #e67700;
+        --bad: #c92a2a;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--fg); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    h1 { margin: 0 0 12px 0; font-size: 20px; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media (min-width: 980px) {
+      .grid-2 { grid-template-columns: 1fr 1fr; }
+    }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .card h2 { margin: 0 0 10px 0; font-size: 16px; }
+    .card .split-2 { margin-bottom: 10px; }
+    .row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-bottom: 10px; align-items: center; }
+    .row label { font-size: 12px; color: var(--muted); }
+    .row input[type="text"], .row input[type="email"], .row textarea, .row input[type="file"] {
+      width: 100%; border: 1px solid var(--border); background: transparent; color: var(--fg);
+      padding: 8px 10px; border-radius: 8px; font-size: 14px;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--accent); color: #fff; border: 1px solid transparent;
+      border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; font-size: 14px;
+    }
+    .btn:hover { background: var(--accent-2); }
+    .btn.ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+    .btn.good { background: var(--good); }
+    .btn.warn { background: var(--warn); }
+    .btn.bad { background: var(--bad); }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+    .list { border: 1px dashed var(--border); border-radius: 8px; overflow: hidden; }
+    .list .head, .list .rowi { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; padding: 8px 10px; align-items: center; }
+    .list .head { background: rgba(128,128,128,0.08); font-size: 12px; color: var(--muted); }
+    .list .head input[type="checkbox"] { margin: 0; }
+    .list .rowi:nth-child(odd) { background: rgba(128,128,128,0.04); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pill { font-size: 11px; color: var(--muted); }
+    .right { text-align: right; }
+    .actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .spacer { height: 8px; }
+    .toast {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: 18px; background: var(--panel); border: 1px solid var(--border);
+      color: var(--fg); padding: 10px 14px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      min-width: 240px; text-align: center; display: none;
+    }
+    .kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: rgba(128,128,128,0.08); padding: 0 6px; border-radius: 6px; font-size: 12px; }
+    .hint { font-size: 12px; color: var(--muted); }
+    .split-2 { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+    a { color: var(--accent-2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .checkbox { display: inline-flex; align-items: center; gap: 8px; }
+    input[type="checkbox"] { width: 18px; height: 18px; }
+    .small { font-size: 12px; }
+    .hidden { display: none !important; }
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background-color: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+    .progress-fill {
+      height: 100%;
+      background-color: var(--accent);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    .progress-text {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      margin: 4px 0;
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .modal { position: fixed; inset: 0; display: grid; grid-template-rows: 1fr; z-index: 1000; }
+    .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(1px); }
+    .modal-content { position: relative; margin: 5vh auto; max-width: 720px; width: calc(100% - 32px); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+    .modal-content .row { grid-template-columns: 1fr 2fr; }
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+      gap: 8px;
+    }
+    .tab {
+      padding: 8px 16px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s ease;
+    }
+    .tab:hover {
+      color: var(--fg);
+      background: rgba(128,128,128,0.08);
+    }
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      background: rgba(128,128,128,0.08);
+    }
+    .tab-content {
+      display: none;
+      max-height: 60vh;
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .modal-content {
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .tab-content::-webkit-scrollbar {
+      width: 6px;
+    }
+    .tab-content::-webkit-scrollbar-track {
+      background: var(--border);
+      border-radius: 3px;
+    }
+    .tab-content::-webkit-scrollbar-thumb {
+      background: var(--muted);
+      border-radius: 3px;
+    }
+    .tab-content::-webkit-scrollbar-thumb:hover {
+      background: var(--fg);
+    }
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      color: var(--muted);
+      transition: border-color 0.3s ease;
+    }
+    .drop-zone.dragover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .config-section {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .config-section h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Invoice Formatter - Static Version</h1>
+    <p class="muted">Convert GnuCash Easy Invoice HTML exports to improved HTML. This version runs entirely in your browser.</p>
+    
+    <div class="config-section">
+      <h3>📁 Project Folder</h3>
+      <p class="hint">Select your project folder containing input/, output/, and config/ subdirectories.</p>
+      <div class="toolbar">
+        <label class="btn">
+          📁 Select Project Folder
+          <input type="file" id="input-project-folder" webkitdirectory directory style="display: none;">
+        </label>
+        <button class="btn ghost" id="btn-clear-folder">🗑️ Clear Folder</button>
+      </div>
+      <div id="folder-status" class="small muted" style="margin-top: 8px;">No folder selected</div>
+    </div>
+
+    <div class="split-2">
+      <div class="toolbar">
+        <button class="btn warn" id="btn-convert-all">⚡ Convert All</button>
+        <button class="btn good" id="btn-convert">✓ Convert Selected</button>
+        <div class="dropdown">
+          <button class="btn ghost">⚙️ Options</button>
+          <div class="dropdown-content">
+            <label class="checkbox"><input id="opt-keep-html" type="checkbox" checked /> 📄 Keep improved HTML</label>
+            <label class="checkbox"><input id="opt-debug" type="checkbox" /> 🐛 Debug mode</label>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button class="btn bad" id="btn-clear-selected">🗑️ Clear Selected</button>
+        <button class="btn" id="btn-edit-config">⚙️ Edit Config</button>
+      </div>
+    </div>
+
+    <div class="progress-container hidden" id="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-text" id="progress-text">Preparing...</div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid grid-2">
+      <div class="card" id="inputs-card">
+        <div class="split-2">
+          <h2>Input Files</h2>
+          <div class="toolbar">
+            <label class="btn ghost">
+              📁 Add HTML Files
+              <input type="file" id="input-files" multiple accept=".html" style="display: none;">
+            </label>
+          </div>
+        </div>
+        <div class="drop-zone" id="drop-zone">
+          <p>📄 Drag & drop HTML invoice files here</p>
+          <p class="small">or use the "Add HTML Files" button above</p>
+        </div>
+        <div class="list hidden" id="inputs-list">
+          <div class="head">
+            <div><input type="checkbox" id="select-all-inputs" title="Select All"></div>
+            <div class="sortable" data-sort="name">📄 File</div>
+            <div class="right">⚡ Actions</div>
+          </div>
+          <!-- items inserted -->
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="split-2">
+          <h2>Output Files</h2>
+          <div class="toolbar">
+            <div class="small muted">Files are saved to your output/ folder</div>
+          </div>
+        </div>
+        <div class="list" id="outputs-list">
+          <div class="head">
+            <div><input type="checkbox" id="select-all-outputs" title="Select All"></div>
+            <div class="sortable" data-sort="name">📄 File</div>
+            <div class="right">⚡ Actions</div>
+          </div>
+          <!-- items inserted -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div id="config-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h2>Edit configuration</h2>
+      
+      <div class="tabs">
+        <button class="tab active" data-tab="general">📋 General</button>
+        <button class="tab" data-tab="bank">🏦 Bank</button>
+        <button class="tab" data-tab="dates">📅 Dates</button>
+        <button class="tab" data-tab="columns">📊 Columns</button>
+        <button class="tab" data-tab="summary">📋 Summary</button>
+      </div>
+      
+      <div class="modal-body">
+        <!-- General Tab -->
+        <div id="tab-general" class="tab-content active">
+          <div class="row">
+            <label>🖼️ Banner path</label>
+            <input id="cfg-banner" type="text" placeholder="../media/banner.png" />
+          </div>
+          <div class="row">
+            <label>📋 Banner preview</label>
+            <div id="banner-preview" style="border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center;">
+              <p class="hint muted small">No banner configured</p>
+            </div>
+          </div>
+          <div class="hint muted small">Supported formats: Relative paths (../config/banner.png), absolute URLs (https://...), or data URLs (data:image/...)</div>
+          <div class="row">
+            <label>👤 Treasurer name</label>
+            <input id="cfg-treasurer-name" type="text" placeholder="Name" />
+          </div>
+          <div class="row">
+            <label>📧 Treasurer email</label>
+            <input id="cfg-treasurer-email" type="email" placeholder="email@example.com" />
+          </div>
+          <div class="row">
+            <label>🎭 Treasurer title</label>
+            <input id="cfg-treasurer-title" type="text" placeholder="Treasurer" />
+          </div>
+          <div class="row">
+            <label>💳 Payment request</label>
+            <textarea id="cfg-payment-request" placeholder="Payment request text (supports newlines)"></textarea>
+          </div>
+          <div class="row">
+            <label>🧾 Tax message</label>
+            <input id="cfg-tax-message" type="text" placeholder="BTW (21%)" value="BTW (21%)" />
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-hide-empty-fields" type="checkbox" /> 🔍 Hide empty fields in invoice tables</label>
+          </div>
+          <div class="hint muted small">When enabled, empty cells in the invoice table will be completely hidden instead of showing blank cells.</div>
+        </div>
+        
+        <!-- Bank Tab -->
+        <div id="tab-bank" class="tab-content">
+          <div class="row">
+            <label>🏦 Bank BIC</label>
+            <input id="cfg-bank-bic" type="text" placeholder="INGBNL2A" />
+          </div>
+          <div class="row">
+            <label>🧾 BTW number</label>
+            <input id="cfg-bank-btw" type="text" placeholder="NL..." />
+          </div>
+          <div class="row">
+            <label>👤 Account name</label>
+            <input id="cfg-bank-account-name" type="text" placeholder="Account holder" />
+          </div>
+          <div class="row">
+            <label>💳 IBAN</label>
+            <input id="cfg-bank-iban" type="text" placeholder="NL.. .." />
+          </div>
+        </div>
+        
+        <!-- Dates Tab -->
+        <div id="tab-dates" class="tab-content">
+          <div class="row">
+            <label class="checkbox"><input id="cfg-show-date" type="checkbox" /> 📅 Show Date</label>
+          </div>
+          <div class="row">
+            <label>📅 Date Format</label>
+            <input id="cfg-date-format" type="text" placeholder="%Y-%m-%d" />
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-show-due-date" type="checkbox" /> ⏰ Show Due Date</label>
+          </div>
+          <div class="row">
+            <label>⏰ Due Date Format</label>
+            <input id="cfg-due-date-format" type="text" placeholder="%Y-%m-%d" />
+          </div>
+        </div>
+        
+        <!-- Columns Tab -->
+        <div id="tab-columns" class="tab-content">
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-date" type="checkbox" /> 📅 Show Date Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-description" type="checkbox" /> 📝 Show Description Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-action" type="checkbox" /> ⚡ Show Action Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-quantity" type="checkbox" /> 🔢 Show Quantity Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-price" type="checkbox" /> 💰 Show Price Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-discount" type="checkbox" /> 🏷️ Show Discount Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-taxable" type="checkbox" /> 🧾 Show Taxable Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-tax-amount" type="checkbox" /> 💸 Show Tax Amount Column</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-col-show-total" type="checkbox" /> 📊 Show Total Column</label>
+          </div>
+        </div>
+        
+        <!-- Summary Tab -->
+        <div id="tab-summary" class="tab-content">
+          <div class="row">
+            <label class="checkbox"><input id="cfg-summary-show-net-price" type="checkbox" /> 📊 Show Net Price Row</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-summary-show-tax" type="checkbox" /> 🧾 Show Tax Row</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-summary-show-total-price" type="checkbox" /> 💰 Show Total Price Row</label>
+          </div>
+          <div class="row">
+            <label class="checkbox"><input id="cfg-summary-show-amount-due" type="checkbox" /> 💳 Show Amount Due Row</label>
+          </div>
+          <div class="hint muted small">Control which summary rows appear at the bottom of the invoice table.</div>
+        </div>
+        
+      </div>
+      
+      <div class="toolbar">
+        <button class="btn" id="cfg-save">💾 Save</button>
+        <button class="btn ghost" id="cfg-cancel">✖️ Cancel</button>
+      </div>
+      <div class="hint muted small">Configuration is stored in your browser's local storage.</div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
