@@ -171,6 +171,26 @@ function downloadFile(content, filename, mimeType = 'text/yaml') {
     URL.revokeObjectURL(url);
 }
 
+// Output folder handling
+function saveToOutputFolder(content, filename) {
+    // In a browser environment, we can't directly save to a folder
+    // But we can trigger a download and update the output files list
+    downloadFile(content, filename, 'text/html');
+    
+    // Add to output files list for display
+    const fileObj = {
+        id: Date.now() + Math.random() + '_' + filename,
+        name: filename,
+        size: new Blob([content]).size,
+        content: content,
+        type: 'html'
+    };
+    
+    STATE.outputFiles.push(fileObj);
+    console.log(`Saved ${filename} to output folder (${formatBytes(fileObj.size)})`);
+    return fileObj;
+}
+
 // Folder handling
 async function handleProjectFolder(files) {
     try {
@@ -1034,6 +1054,7 @@ async function convertFiles(selectedOnly = false) {
     
     const keepHtml = el("#opt-keep-html").checked;
     const debug = el("#opt-debug").checked;
+    const overwrite = el("#opt-overwrite").checked;
     
     let converted = 0;
     let errors = 0;
@@ -1071,13 +1092,31 @@ async function convertFiles(selectedOnly = false) {
                     content: improvedHtml,
                     type: 'html'
                 };
+                
+                // Check for overwrite
+                if (!overwrite) {
+                    const existingIndex = STATE.outputFiles.findIndex(f => f.name === htmlFileObj.name);
+                    if (existingIndex !== -1) {
+                        console.log(`Skipping ${htmlFileObj.name} - already exists (overwrite disabled)`);
+                        continue;
+                    }
+                }
+                
                 STATE.outputFiles.push(htmlFileObj);
+                
+                // Save to output folder
+                saveToOutputFolder(improvedHtml, htmlFileObj.name);
             }
             
             converted++;
             
             if (debug) {
                 console.log(`Converted ${fileObj.name} -> ${baseFilename}`);
+            }
+            
+            // Show immediate feedback for each conversion
+            if (keepHtml) {
+                console.log(`💾 Saved: ${baseFilename}-improved.html`);
             }
             
         } catch (e) {
@@ -1094,7 +1133,14 @@ async function convertFiles(selectedOnly = false) {
     
     setTimeout(() => {
         showProgress(false);
-        toast(`Conversion complete. ${converted} file(s) converted.`, errors > 0 ? "warn" : "good");
+        let message = `Conversion complete. ${converted} file(s) converted.`;
+        if (keepHtml) {
+            message += ` Files downloaded to your Downloads folder.`;
+        }
+        if (errors > 0) {
+            message += ` ${errors} error(s) occurred.`;
+        }
+        toast(message, errors > 0 ? "warn" : "good");
     }, 1000);
     
     STATE.conversion.isRunning = false;
@@ -1398,6 +1444,28 @@ function wire() {
     // Banner path input listener for live preview
     el("#cfg-banner").addEventListener("input", (e) => {
         updateBannerPreview(e.target.value);
+    });
+    
+    // Options dropdown functionality
+    const optionsButton = el("#options-button");
+    const optionsDropdown = el("#options-dropdown");
+    const dropdownContent = el("#dropdown-content");
+    
+    optionsButton.addEventListener("click", (e) => {
+        e.stopPropagation();
+        optionsDropdown.classList.toggle("show");
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener("click", (e) => {
+        if (!optionsDropdown.contains(e.target)) {
+            optionsDropdown.classList.remove("show");
+        }
+    });
+    
+    // Prevent dropdown from closing when clicking inside
+    dropdownContent.addEventListener("click", (e) => {
+        e.stopPropagation();
     });
 }
 

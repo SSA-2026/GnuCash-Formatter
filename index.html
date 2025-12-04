@@ -166,6 +166,35 @@
     .tab-content::-webkit-scrollbar-thumb:hover {
       background: var(--fg);
     }
+    .dropdown {
+      position: relative;
+      display: inline-block;
+    }
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      background-color: var(--panel);
+      min-width: 200px;
+      box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+      z-index: 1000;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      right: 0;
+    }
+    .dropdown-content label {
+      display: block;
+      padding: 4px 8px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background-color 0.2s;
+    }
+    .dropdown-content label:hover {
+      background-color: rgba(128,128,128,0.1);
+    }
+    .dropdown.show .dropdown-content {
+      display: block;
+    }
     .drop-zone {
       border: 2px dashed var(--border);
       border-radius: 8px;
@@ -213,9 +242,10 @@
       <div class="toolbar">
         <button class="btn warn" id="btn-convert-all">⚡ Convert All</button>
         <button class="btn good" id="btn-convert">✓ Convert Selected</button>
-        <div class="dropdown">
-          <button class="btn ghost">⚙️ Options</button>
-          <div class="dropdown-content">
+        <div class="dropdown" id="options-dropdown">
+          <button class="btn ghost" id="options-button">⚙️ Options</button>
+          <div class="dropdown-content" id="dropdown-content">
+            <label class="checkbox"><input id="opt-overwrite" type="checkbox" /> 🔄 Overwrite existing files</label>
             <label class="checkbox"><input id="opt-keep-html" type="checkbox" checked /> 📄 Keep improved HTML</label>
             <label class="checkbox"><input id="opt-debug" type="checkbox" /> 🐛 Debug mode</label>
           </div>
