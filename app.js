@@ -4,6 +4,8 @@
 // Global state
 let STATE = {
     projectFolder: null,
+    projectDirectoryHandle: null,
+    outputDirectoryHandle: null,
     config: null,
     ibanConfig: null,
     inputFiles: [],
@@ -172,23 +174,375 @@ function downloadFile(content, filename, mimeType = 'text/yaml') {
 }
 
 // Output folder handling
-function saveToOutputFolder(content, filename) {
-    // In a browser environment, we can't directly save to a folder
-    // But we can trigger a download and update the output files list
-    downloadFile(content, filename, 'text/html');
+async function saveToOutputFolder(content, filename) {
+    // Try to save to the project's output directory using File System Access API
+    if (STATE.outputDirectoryHandle) {
+        try {
+            const fileHandle = await STATE.outputDirectoryHandle.getFileHandle(filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(content);
+            await writable.close();
+            console.log(`Saved ${filename} to output folder (${formatBytes(new Blob([content]).size)})`);
+            
+            // Add to output files list for display
+            const fileObj = {
+                id: Date.now() + Math.random() + '_' + filename,
+                name: filename,
+                size: new Blob([content]).size,
+                content: content,
+                type: 'html',
+                savedToFile: true
+            };
+            
+            STATE.outputFiles.push(fileObj);
+            return fileObj;
+        } catch (error) {
+            console.error('Failed to save to output folder:', error);
+            toast(`Failed to save ${filename} to output folder: ${error.message}`, "bad");
+        }
+    }
     
-    // Add to output files list for display
+    // Fallback: store in memory if no output directory is available
     const fileObj = {
         id: Date.now() + Math.random() + '_' + filename,
         name: filename,
         size: new Blob([content]).size,
         content: content,
-        type: 'html'
+        type: 'html',
+        savedToFile: false
     };
     
     STATE.outputFiles.push(fileObj);
-    console.log(`Saved ${filename} to output folder (${formatBytes(fileObj.size)})`);
+    console.log(`Stored ${filename} in output list (${formatBytes(fileObj.size)})`);
     return fileObj;
+}
+
+// PDF saving to output folder
+async function savePdfToOutputFolder(pdfBlob, filename) {
+    // Try to save to the project's output directory using File System Access API
+    if (STATE.outputDirectoryHandle) {
+        try {
+            const fileHandle = await STATE.outputDirectoryHandle.getFileHandle(filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(pdfBlob);
+            await writable.close();
+            console.log(`Saved ${filename} to output folder (${formatBytes(pdfBlob.size)})`);
+            return true;
+        } catch (error) {
+            console.error('Failed to save PDF to output folder:', error);
+            toast(`Failed to save ${filename} to output folder: ${error.message}`, "bad");
+        }
+    }
+    return false;
+}
+
+// PDF generation from HTML using jsPDF and html2canvas
+async function generatePdfFromHtml(htmlContent, filename) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Wait for libraries to be loaded with timeout
+            const waitForLibraries = async () => {
+                const maxWaitTime = 10000; // 10 seconds
+                const checkInterval = 100; // 100ms
+                let waited = 0;
+                
+                while (waited < maxWaitTime) {
+                    if (typeof window.jsPDF !== 'undefined' && typeof window.html2canvas !== 'undefined') {
+                        return true;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, checkInterval));
+                    waited += checkInterval;
+                }
+                return false;
+            };
+
+            // Check if jsPDF and html2canvas are loaded
+            const librariesLoaded = await waitForLibraries();
+            if (!librariesLoaded) {
+                throw new Error('PDF libraries failed to load. Please check your internet connection and refresh the page.');
+            }
+
+            // Create a temporary container for the HTML content
+            const tempContainer = document.createElement('div');
+            tempContainer.style.position = 'absolute';
+            tempContainer.style.left = '-9999px';
+            tempContainer.style.top = '0';
+            tempContainer.style.width = '1006px'; // Match the banner width
+            tempContainer.style.backgroundColor = 'white';
+            tempContainer.innerHTML = htmlContent;
+            document.body.appendChild(tempContainer);
+
+            // Wait a bit for images to load
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Use html2canvas to capture the HTML as an image
+            const canvas = await html2canvas(tempContainer, {
+                scale: 2, // Higher quality
+                useCORS: true,
+                allowTaint: true,
+                backgroundColor: '#ffffff',
+                width: 1006,
+                windowWidth: 1006
+            });
+
+            // Remove the temporary container
+            document.body.removeChild(tempContainer);
+
+            // Create PDF
+            const { jsPDF } = window.jsPDF;
+            const pdf = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            // Calculate dimensions to fit the content properly
+            const imgWidth = 210; // A4 width in mm
+            const pageHeight = 297; // A4 height in mm
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            let heightLeft = imgHeight;
+            let position = 0;
+
+            // Add the image to PDF
+            pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight);
+            heightLeft -= pageHeight;
+
+            // Add new pages if content is longer than one page
+            while (heightLeft >= 0) {
+                position = heightLeft - imgHeight;
+                pdf.addPage();
+                pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+            }
+
+            // Generate PDF blob
+            const pdfBlob = pdf.output('blob');
+            resolve(pdfBlob);
+
+        } catch (error) {
+            console.error('PDF generation failed:', error);
+            reject(error);
+        }
+    });
+}
+
+// IBAN Modal functions
+function showIbanModal() {
+    el("#iban-modal").classList.remove("hidden");
+    el("#iban-input").value = STATE.ibanConfig?.iban || "";
+    el("#iban-input").focus();
+}
+
+function hideIbanModal() {
+    el("#iban-modal").classList.add("hidden");
+}
+
+function saveIbanFromModal() {
+    const ibanValue = el("#iban-input").value.trim();
+    
+    if (!ibanValue) {
+        toast("Please enter an IBAN", "warn");
+        return;
+    }
+    
+    STATE.ibanConfig = STATE.ibanConfig || {};
+    STATE.ibanConfig.iban = ibanValue;
+    
+    saveConfigToStorage();
+    saveIbanToFile();
+    hideIbanModal();
+    toast("IBAN saved successfully", "good");
+    
+    // Retry the conversion
+    setTimeout(() => {
+        convertFiles(false);
+    }, 500);
+}
+
+// Save IBAN to iban.yml file
+async function saveIbanToFile() {
+    if (!STATE.projectDirectoryHandle) {
+        console.log('No project directory handle, skipping IBAN file save');
+        return;
+    }
+    
+    try {
+        // Get the config directory handle
+        const configHandle = await STATE.projectDirectoryHandle.getDirectoryHandle('config');
+        
+        // Create or get the iban.yml file
+        const fileHandle = await configHandle.getFileHandle('iban.yml', { create: true });
+        const writable = await fileHandle.createWritable();
+        
+        // Generate YAML content
+        const yamlContent = `iban: "${STATE.ibanConfig.iban}"\n`;
+        
+        // Write to file
+        await writable.write(yamlContent);
+        await writable.close();
+        
+        console.log('IBAN saved to iban.yml file');
+    } catch (error) {
+        console.error('Failed to save IBAN to file:', error);
+        // Don't show error to user as localStorage save was successful
+    }
+}
+
+// File System Access API functions
+async function ensureDirectoryStructure(directoryHandle) {
+    try {
+        // Create input, output, and config subdirectories if they don't exist
+        await directoryHandle.getDirectoryHandle('input', { create: true });
+        await directoryHandle.getDirectoryHandle('output', { create: true });
+        await directoryHandle.getDirectoryHandle('config', { create: true });
+        console.log('Directory structure ensured: input/, output/, config/');
+        return true;
+    } catch (error) {
+        console.error('Failed to create directory structure:', error);
+        toast("Failed to create directory structure: " + error.message, "bad");
+        return false;
+    }
+}
+
+async function selectProjectFolderWithFileSystem() {
+    try {
+        if ('showDirectoryPicker' in window) {
+            const directoryHandle = await window.showDirectoryPicker({
+                mode: 'readwrite'
+            });
+            
+            // Ensure the required directory structure exists
+            const structureCreated = await ensureDirectoryStructure(directoryHandle);
+            if (!structureCreated) {
+                return;
+            }
+            
+            // Get handles to the subdirectories
+            const inputHandle = await directoryHandle.getDirectoryHandle('input');
+            const outputHandle = await directoryHandle.getDirectoryHandle('output');
+            const configHandle = await directoryHandle.getDirectoryHandle('config');
+            
+            // Store the directory handles
+            STATE.projectDirectoryHandle = directoryHandle;
+            STATE.outputDirectoryHandle = outputHandle;
+            
+            // Load files from the subdirectories
+            await loadFilesFromDirectoryStructure(inputHandle, outputHandle, configHandle);
+            
+            updateFolderStatus();
+            toast("Project folder selected and structure created", "good");
+        } else {
+            toast("File System Access API not supported in this browser", "bad");
+        }
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('Failed to select project folder:', error);
+            toast("Failed to select project folder: " + error.message, "bad");
+        }
+    }
+}
+
+async function loadFilesFromDirectoryStructure(inputHandle, outputHandle, configHandle) {
+    try {
+        // Reset state
+        STATE.projectFolder = { name: STATE.projectDirectoryHandle.name, files: [] };
+        STATE.inputFiles = [];
+        STATE.outputFiles = [];
+        STATE.selectedInputs.clear();
+        STATE.selectedOutputs.clear();
+        
+        // Load config files
+        const configFiles = {};
+        try {
+            const configYmlHandle = await configHandle.getFileHandle('config.yml');
+            const configYmlFile = await configYmlHandle.getFile();
+            const configYmlText = await configYmlFile.text();
+            configFiles.config = parseSimpleYaml(configYmlText);
+            console.log('Loaded config.yml');
+        } catch (e) {
+            console.log('config.yml not found, will use defaults');
+        }
+        
+        try {
+            const ibanYmlHandle = await configHandle.getFileHandle('iban.yml');
+            const ibanYmlFile = await ibanYmlHandle.getFile();
+            const ibanYmlText = await ibanYmlFile.text();
+            configFiles.iban = parseSimpleYaml(ibanYmlText);
+            console.log('Loaded iban.yml');
+        } catch (e) {
+            console.log('iban.yml not found, will use defaults');
+        }
+        
+        // Load input files
+        const inputFiles = [];
+        for await (const [name, handle] of inputHandle.entries()) {
+            if (name.endsWith('.html')) {
+                const file = await handle.getFile();
+                const fileObj = {
+                    id: Date.now() + Math.random() + '_' + name,
+                    file: file,
+                    name: name,
+                    size: file.size,
+                    lastModified: file.lastModified
+                };
+                inputFiles.push(fileObj);
+                console.log('Added input file:', name);
+            }
+        }
+        
+        // Load output files
+        const outputFiles = [];
+        for await (const [name, handle] of outputHandle.entries()) {
+            if (name.endsWith('.html') || name.endsWith('.pdf')) {
+                const file = await handle.getFile();
+                const fileObj = {
+                    id: Date.now() + Math.random() + '_' + name,
+                    file: file,
+                    name: name,
+                    size: file.size,
+                    lastModified: file.lastModified,
+                    type: name.endsWith('.pdf') ? 'pdf' : 'html'
+                };
+                outputFiles.push(fileObj);
+                console.log('Added output file:', name);
+            }
+        }
+        
+        // Update configuration
+        if (configFiles.config) {
+            STATE.config = { ...DEFAULT_CONFIG, ...configFiles.config };
+            console.log('Loaded config:', STATE.config);
+        } else {
+            STATE.config = { ...DEFAULT_CONFIG };
+            console.log('Using default config');
+        }
+        
+        if (configFiles.iban) {
+            STATE.ibanConfig = { ...DEFAULT_IBAN_CONFIG, ...configFiles.iban };
+            console.log('Loaded IBAN config:', STATE.ibanConfig);
+        } else {
+            STATE.ibanConfig = { ...DEFAULT_IBAN_CONFIG };
+            console.log('Using default IBAN config');
+        }
+        
+        // Update files
+        STATE.inputFiles = inputFiles;
+        STATE.outputFiles = outputFiles;
+        
+        // Save to localStorage
+        saveConfigToStorage();
+        
+        // Update UI
+        renderInputs();
+        renderOutputs();
+        
+        const configCount = Object.keys(configFiles).length;
+        toast(`Loaded project: ${inputFiles.length} input files, ${outputFiles.length} output files, ${configCount} config files`, "good");
+        
+    } catch (error) {
+        console.error('Failed to load files from directory structure:', error);
+        toast("Failed to load project files: " + error.message, "bad");
+    }
 }
 
 // Folder handling
@@ -601,8 +955,18 @@ function buildImprovedHtml(data, config, ibanConfig) {
     const c = config || {};
     const iban = ibanConfig || {};
     
-    const bannerHtml = c.banner_path ?
-        `<tr><td align="left"><img src="${escapeHtml(c.banner_path)}" alt="Invoice Banner" onerror="this.style.display='none'; this.alt='Banner not found: ${escapeHtml(c.banner_path)}';" /></td></tr>` : "";
+    let bannerHtml = "";
+    if (c.banner_path) {
+        // If using File System Access API, construct the path relative to the project directory
+        if (STATE.projectDirectoryHandle && !c.banner_path.startsWith('http') && !c.banner_path.startsWith('data:')) {
+            // For relative paths, assume they're in the config directory
+            const bannerPath = c.banner_path.startsWith('./') ? c.banner_path.substring(2) : c.banner_path;
+            bannerHtml = `<tr><td align="left"><img src="./config/${bannerPath}" alt="Invoice Banner" onerror="this.style.display='none'; this.alt='Banner not found: config/${bannerPath}';" /></td></tr>`;
+        } else {
+            // For absolute URLs or data URLs, use as-is
+            bannerHtml = `<tr><td align="left"><img src="${escapeHtml(c.banner_path)}" alt="Invoice Banner" onerror="this.style.display='none'; this.alt='Banner not found: ${escapeHtml(c.banner_path)}';" /></td></tr>`;
+        }
+    }
     
     // Build headers based on column settings
     const columnSettings = c.column_settings || {};
@@ -725,129 +1089,224 @@ function buildImprovedHtml(data, config, ibanConfig) {
 <head>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
 <style type="text/css">
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap');
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: "Open Sans", sans-serif;
+    background-color: #ffffff;
+    color: #000000;
+    margin: 0;
+    padding: 20px;
+    line-height: 1.4;
+}
+
+.invoice-container {
+    max-width: 1006px;
+    margin: 0 auto;
+    background: white;
+    padding: 0;
+}
+
 img {
     max-width: 100%;
     width: 1006px;
     display: block;
     margin-left: auto;
     margin-right: auto;
+    height: auto;
 }
-@media (prefers-color-scheme: dark) {body {color: #000; background-color: #fff;}}
-h3 { font-family: "Open Sans", sans-serif; font-size: 15pt; font-weight: bold; }
-a { font-family: "Open Sans", sans-serif; font-size: 10pt; font-style: italic; }
-body, p, table, tr, td { vertical-align: top; font-family: "Open Sans", sans-serif; font-size: 11pt; }
-tr.alternate-row { background: #ffffff }
-tr { page-break-inside: avoid !important;}
-html, body { height: 100vh; margin: 0 8px; }
-td, th { border-color: grey }
-th.column-heading-left { text-align: left; font-family: "Open Sans", sans-serif; font-size: 10pt; }
-th.column-heading-center { text-align: center; font-family: "Open Sans", sans-serif; font-size: 10pt; }
-th.column-heading-right { text-align: right; font-family: "Open Sans", sans-serif; font-size: 10pt; }
-td.highlight {background-color:#e1e1e1}
-td.neg { color: red; }
-td.number-cell, td.total-number-cell { text-align: right; white-space: nowrap; }
-td.date-cell { white-space: nowrap; }
-td.anchor-cell { white-space: nowrap; font-family: "Open Sans", sans-serif; font-size: 11pt; }
-td.number-cell { font-family: "Open Sans", sans-serif; font-size: 12pt; }
-td.number-header { text-align: right; font-family: "Open Sans", sans-serif; font-size: 10pt; }
-td.text-cell { font-family: "Open Sans", sans-serif; font-size: 11pt; }
-td.total-number-cell { font-family: "Open Sans", sans-serif; font-size: 12pt; }
-td.total-label-cell { font-family: "Open Sans", sans-serif; font-size: 12pt; }
-td.centered-label-cell { text-align: center; font-family: "Open Sans", sans-serif; font-size: 12pt; font-weight: bold; }
-sub { top: 0.4em; }
-sub, sup { vertical-align: baseline; position: relative; top: -0.4em; }
-@media print { html, body { height: unset; }}
-.div-align-right { float: right; }
-.div-align-right .maybe-align-right { text-align: right }
-.entries-table * { border-width: 1px; border-style:solid; border-collapse: collapse}
-.entries-table > table { width: 100% }
-.company-table > table * { padding: 0px; }
-.client-table > table * { padding: 0px; }
-.invoice-details-table > table * { padding: 0px; text-indent: 0.2em; }
-@media print { .main-table > table { width: 75%; }}
-.company-name, .client-name { font-size: x-large; margin: 0; line-height: 1.25; }
-.client-table .client-name { text-align: left; }
-.client-table .maybe-align-right { text-align: left; }
-.invoice-title { font-weight: bold; }
-.invoice-notes { margin-top: 0; width: 100%; }
+
+h3 {
+    font-family: "Open Sans", sans-serif;
+    font-size: 15pt;
+    font-weight: bold;
+    margin: 10px 0;
+}
+
+a {
+    font-family: "Open Sans", sans-serif;
+    font-size: 10pt;
+    font-style: italic;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0;
+}
+
+table td, table th {
+    border: 1px solid #ccc;
+    padding: 8px;
+    vertical-align: top;
+    font-family: "Open Sans", sans-serif;
+    font-size: 11pt;
+}
+
+th {
+    background-color: #f5f5f5;
+    font-weight: 600;
+    text-align: left;
+}
+
+.number-cell, .total-number-cell {
+    text-align: right;
+    white-space: nowrap;
+    font-family: "Open Sans", sans-serif;
+    font-size: 12pt;
+}
+
+.total-label-cell {
+    font-family: "Open Sans", sans-serif;
+    font-size: 12pt;
+    font-weight: 600;
+}
+
+.total-number-cell {
+    font-weight: 600;
+}
+
+.date-cell {
+    white-space: nowrap;
+}
+
+.invoice-title {
+    font-size: 18pt;
+    font-weight: bold;
+    margin: 20px 0;
+    text-align: center;
+}
+
+.company-name, .client-name {
+    font-size: 16pt;
+    font-weight: 600;
+    margin: 0 0 5px 0;
+    line-height: 1.25;
+}
+
+.client-address, .company-address {
+    font-size: 11pt;
+    line-height: 1.4;
+    margin: 0;
+}
+
+.invoice-details-table td {
+    padding: 4px 8px;
+    border: none;
+}
+
+.invoice-details-table td:first-child {
+    font-weight: 600;
+}
+
+.entries-table {
+    margin: 20px 0;
+}
+
+.entries-table th {
+    background-color: #92a7b6;
+    color: white;
+    font-weight: 600;
+    text-align: left;
+    padding: 10px 8px;
+}
+
+.entries-table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+}
+
+.entries-table tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.entries-table tr:first-child td {
+    background-color: #92a7b6;
+    color: white;
+    font-weight: 600;
+}
+
+.invoice-notes {
+    margin-top: 30px;
+    font-size: 11pt;
+    line-height: 1.6;
+    white-space: pre-line;
+}
+
+.div-align-right {
+    text-align: right;
+}
+
+.div-align-right .maybe-align-right {
+    text-align: right;
+}
+
+@media print {
+    body {
+        margin: 0;
+        padding: 0;
+        background: white;
+    }
+    
+    .invoice-container {
+        margin: 0;
+        max-width: 100%;
+    }
+    
+    .entries-table tr {
+        page-break-inside: avoid;
+    }
+    
+    .invoice-notes {
+        page-break-inside: avoid;
+    }
+}
 </style>
 </head>
-<body text="#000000" link="#1c3661" bgcolor="#ffffff">
-<table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
-  <tbody>
+<body>
+<div class="invoice-container">
     ${bannerHtml}
-    <tr><td><h3></h3></td></tr>
-    <tr><td>
-      <div class="main-table">
-        <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
-          <tbody>
-            <tr><td colspan="2"><div class="invoice-title">Invoice #${escapeHtml(data.invoice_number || "")}</div></td></tr>
-            <tr>
-              <td> </td>
-              <td>
-                <div class="div-align-right">
-                  <div class="invoice-details-table">
-                    <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
-                      <tbody>
-                        ${showDate ? `<tr><td>Date:</td><td><div class="div-align-right">${escapeHtml(data.date || "")}</div></td></tr>` : ''}
-                        ${showDueDate ? `<tr><td>Due Date:</td><td><div class="div-align-right">${escapeHtml(data.due_date || "")}</div></td></tr>` : ''}
-                      </tbody>
+    
+    <div class="invoice-title">Invoice #${escapeHtml(data.invoice_number || "")}</div>
+    
+    <table style="margin-bottom: 30px;">
+        <tr>
+            <td style="width: 50%; vertical-align: top; padding-right: 20px;">
+                <div class="client-name">${data.client_name_html || ""}</div>
+                <div class="client-address">${data.client_address_html || ""}</div>
+            </td>
+            <td style="width: 50%; vertical-align: top; text-align: right;">
+                <div class="company-name">${data.company_name_html || ""}</div>
+                <div class="company-address">${data.company_address_html || ""}</div>
+                
+                <div class="invoice-details-table" style="margin-top: 20px;">
+                    <table>
+                        ${showDate ? `<tr><td>Date:</td><td style="text-align: right;">${escapeHtml(data.date || "")}</td></tr>` : ''}
+                        ${showDueDate ? `<tr><td>Due Date:</td><td style="text-align: right;">${escapeHtml(data.due_date || "")}</td></tr>` : ''}
                     </table>
-                  </div>
                 </div>
-              </td>
-            </tr>
-            <tr>
-              <td>
-                <div class="client-table">
-                  <table cellspacing="1" cellpadding="1" border="0" style="margin-left:0; margin-right:0">
-                    <tbody>
-                      <tr><td><div class="maybe-align-right client-name">${data.client_name_html || ""}</div></td></tr>
-                      <tr><td><div class="maybe-align-right client-address">${data.client_address_html || ""}</div></td></tr>
-                    </tbody>
-                  </table>
-                </div>
-              </td>
-              <td>
-                <div class="div-align-right">
-                  <div class="company-table">
-                    <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
-                      <tbody>
-                        <tr><td><div class="maybe-align-right company-name">${data.company_name_html || ""}</div></td></tr>
-                        <tr><td><div class="maybe-align-right company-address">${data.company_address_html || ""}</div></td></tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </td>
-            </tr>
-            <tr><td> </td><td><div class="div-align-right"> </div></td></tr>
-            <tr>
-              <td colspan="2">
-                <div class="entries-table">
-                  <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
-                    <thead>
-                      <tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>
-                    </thead>
-                    <tbody>
-                      ${itemRows.join('')}
-                      ${summaryHtml}
-                    </tbody>
-                  </table>
-                </div>
-              </td>
-            </tr>
-            <tr>
-              <td colspan="2">
-                <div class="invoice-notes">${notesHtml}</div>
-              </td>
-            </tr>
-          </tbody>
+            </td>
+        </tr>
+    </table>
+    
+    <div class="entries-table">
+        <table>
+            <thead>
+                <tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>
+            </thead>
+            <tbody>
+                ${itemRows.join('')}
+                ${summaryHtml}
+            </tbody>
         </table>
-      </div>
-    </td></tr>
-  </tbody>
-</table>
+    </div>
+    
+    <div class="invoice-notes">${notesHtml}</div>
+</div>
 </body>
 </html>`;
 }
@@ -1022,7 +1481,8 @@ function previewOutputFile(fileObj) {
 }
 
 function downloadOutputFile(fileObj) {
-    downloadFile(fileObj.content, fileObj.name, 'text/html');
+    const mimeType = fileObj.type === 'pdf' ? 'application/pdf' : 'text/html';
+    downloadFile(fileObj.content, fileObj.name, mimeType);
 }
 
 function printOutputFile(fileObj) {
@@ -1039,7 +1499,13 @@ async function convertFiles(selectedOnly = false) {
         return;
     }
     
-    const filesToConvert = selectedOnly ? 
+    // Check if IBAN is configured
+    if (!STATE.ibanConfig || !STATE.ibanConfig.iban || !STATE.ibanConfig.iban.trim()) {
+        showIbanModal();
+        return;
+    }
+    
+    const filesToConvert = selectedOnly ?
         STATE.inputFiles.filter(f => STATE.selectedInputs.has(f.id)) :
         STATE.inputFiles;
     
@@ -1053,6 +1519,7 @@ async function convertFiles(selectedOnly = false) {
     updateProgress(0, "Starting conversion...");
     
     const keepHtml = el("#opt-keep-html").checked;
+    const generatePdf = el("#opt-generate-pdf").checked;
     const debug = el("#opt-debug").checked;
     const overwrite = el("#opt-overwrite").checked;
     
@@ -1108,6 +1575,38 @@ async function convertFiles(selectedOnly = false) {
                 saveToOutputFolder(improvedHtml, htmlFileObj.name);
             }
             
+            // Generate PDF
+            if (generatePdf) {
+                try {
+                    const pdfBlob = await generatePdfFromHtml(improvedHtml, baseFilename + '.pdf');
+                    const pdfFileObj = {
+                        id: Date.now() + Math.random() + '_' + baseFilename + '.pdf',
+                        name: baseFilename + '.pdf',
+                        size: pdfBlob.size,
+                        content: pdfBlob,
+                        type: 'pdf'
+                    };
+                    
+                    // Check for overwrite
+                    if (!overwrite) {
+                        const existingIndex = STATE.outputFiles.findIndex(f => f.name === pdfFileObj.name);
+                        if (existingIndex !== -1) {
+                            console.log(`Skipping ${pdfFileObj.name} - already exists (overwrite disabled)`);
+                            continue;
+                        }
+                    }
+                    
+                    STATE.outputFiles.push(pdfFileObj);
+                    
+                    // Save to output folder
+                    await savePdfToOutputFolder(pdfBlob, pdfFileObj.name);
+                    
+                } catch (pdfError) {
+                    console.error(`Failed to generate PDF for ${fileObj.name}:`, pdfError);
+                    errors++;
+                }
+            }
+            
             converted++;
             
             if (debug) {
@@ -1116,7 +1615,18 @@ async function convertFiles(selectedOnly = false) {
             
             // Show immediate feedback for each conversion
             if (keepHtml) {
-                console.log(`💾 Saved: ${baseFilename}-improved.html`);
+                if (STATE.outputDirectoryHandle) {
+                    console.log(`💾 Saved: ${baseFilename}-improved.html`);
+                } else {
+                    console.log(`💾 Stored: ${baseFilename}-improved.html`);
+                }
+            }
+            if (generatePdf) {
+                if (STATE.outputDirectoryHandle) {
+                    console.log(`💾 Saved: ${baseFilename}.pdf`);
+                } else {
+                    console.log(`💾 Stored: ${baseFilename}.pdf`);
+                }
             }
             
         } catch (e) {
@@ -1134,8 +1644,12 @@ async function convertFiles(selectedOnly = false) {
     setTimeout(() => {
         showProgress(false);
         let message = `Conversion complete. ${converted} file(s) converted.`;
-        if (keepHtml) {
-            message += ` Files downloaded to your Downloads folder.`;
+        if (keepHtml || generatePdf) {
+            if (STATE.outputDirectoryHandle) {
+                message += ` Files saved to output folder.`;
+            } else {
+                message += ` Files stored in output list.`;
+            }
         }
         if (errors > 0) {
             message += ` ${errors} error(s) occurred.`;
@@ -1240,8 +1754,14 @@ function saveConfigFromModal() {
     c.bank.account_name = el("#cfg-bank-account-name").value || null;
     
     // IBAN (separate config)
+    const oldIban = STATE.ibanConfig?.iban || "";
     STATE.ibanConfig = STATE.ibanConfig || {};
     STATE.ibanConfig.iban = el("#cfg-bank-iban").value || null;
+    
+    // Save IBAN to file if it changed
+    if (STATE.ibanConfig.iban !== oldIban) {
+        saveIbanToFile();
+    }
     
     // Date settings
     c.date_settings = c.date_settings || {};
@@ -1284,9 +1804,21 @@ function validateBannerPath(bannerPath) {
         return true;
     }
     
-    // For relative paths, show a warning about the limitations
-    if (bannerPath.startsWith('../') || bannerPath.startsWith('./')) {
-        toast("Note: Relative banner paths may not work in browser preview. Consider using absolute URLs or data URLs.", "warn");
+    // For File System Access API, relative paths should be in the config directory
+    if (STATE.projectDirectoryHandle) {
+        if (bannerPath.startsWith('../') || bannerPath.startsWith('./')) {
+            // Remove ./ prefix if present
+            const cleanPath = bannerPath.startsWith('./') ? bannerPath.substring(2) : bannerPath;
+            toast(`Banner will be loaded from: config/${cleanPath}`, "good");
+        } else {
+            // Assume it's a filename in the config directory
+            toast(`Banner will be loaded from: config/${bannerPath}`, "good");
+        }
+    } else {
+        // For relative paths without File System Access API, show warning
+        if (bannerPath.startsWith('../') || bannerPath.startsWith('./')) {
+            toast("Note: Relative banner paths may not work in browser preview. Consider using absolute URLs or data URLs.", "warn");
+        }
     }
     
     return true;
@@ -1336,14 +1868,7 @@ function wire() {
     });
     
     // Project folder handlers
-    el("#input-project-folder").addEventListener("change", (e) => {
-        const files = e.target.files;
-        if (files.length > 0) {
-            handleProjectFolder(files);
-        }
-        e.target.value = ''; // Reset input
-    });
-    
+    el("#btn-select-project-folder").addEventListener("click", selectProjectFolderWithFileSystem);
     el("#btn-clear-folder").addEventListener("click", clearProjectFolder);
     
     // File input handlers (fallback if no folder selected)
@@ -1389,11 +1914,11 @@ function wire() {
             return;
         }
         
-        if (confirm(`Remove ${selectedCount} selected file(s)?`)) {
+        if (confirm(`Delete ${selectedCount} selected file(s)?`)) {
             STATE.inputFiles = STATE.inputFiles.filter(f => !STATE.selectedInputs.has(f.id));
             STATE.selectedInputs.clear();
             renderInputs();
-            toast(`Removed ${selectedCount} file(s)`, "good");
+            toast(`Deleted ${selectedCount} file(s)`, "good");
         }
     });
     
@@ -1411,6 +1936,24 @@ function wire() {
     el("#cfg-save").addEventListener("click", () => {
         saveConfigFromModal();
         el("#config-modal").classList.add("hidden");
+    });
+    
+    // IBAN modal handlers
+    el("#iban-save").addEventListener("click", saveIbanFromModal);
+    el("#iban-cancel").addEventListener("click", hideIbanModal);
+    
+    // Close IBAN modal on backdrop click
+    el("#iban-modal").addEventListener("click", (e) => {
+        if (e.target === el("#iban-modal") || e.target.classList.contains("modal-backdrop")) {
+            hideIbanModal();
+        }
+    });
+    
+    // Handle Enter key in IBAN input
+    el("#iban-input").addEventListener("keypress", (e) => {
+        if (e.key === 'Enter') {
+            saveIbanFromModal();
+        }
     });
     
     // Select all checkboxes

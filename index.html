@@ -2,7 +2,7 @@
 <html lang="en" dir="auto">
 <head>
   <meta charset="UTF-8" />
-  <title>Invoice Formatter - Static Version</title>
+  <title>Invoice Formatter</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -227,16 +227,14 @@
     
     <div class="config-section">
       <h3>📁 Project Folder</h3>
-      <p class="hint">Select your project folder containing input/, output/, and config/ subdirectories.</p>
+      <p class="hint">Select your project folder. The required structure (input/, output/, config/) will be created automatically.</p>
       <div class="toolbar">
-        <label class="btn">
-          📁 Select Project Folder
-          <input type="file" id="input-project-folder" webkitdirectory directory style="display: none;">
-        </label>
+        <button class="btn" id="btn-select-project-folder">📁 Select Project Folder</button>
         <button class="btn ghost" id="btn-clear-folder">🗑️ Clear Folder</button>
       </div>
       <div id="folder-status" class="small muted" style="margin-top: 8px;">No folder selected</div>
     </div>
+
 
     <div class="split-2">
       <div class="toolbar">
@@ -245,14 +243,15 @@
         <div class="dropdown" id="options-dropdown">
           <button class="btn ghost" id="options-button">⚙️ Options</button>
           <div class="dropdown-content" id="dropdown-content">
-            <label class="checkbox"><input id="opt-overwrite" type="checkbox" /> 🔄 Overwrite existing files</label>
-            <label class="checkbox"><input id="opt-keep-html" type="checkbox" checked /> 📄 Keep improved HTML</label>
+            <label class="checkbox"><input id="opt-overwrite" type="checkbox" checked /> 🔄 Overwrite existing files</label>
+            <label class="checkbox"><input id="opt-keep-html" type="checkbox" /> 📄 Keep improved HTML</label>
+            <label class="checkbox"><input id="opt-generate-pdf" type="checkbox" checked /> 📄 Generate PDF</label>
             <label class="checkbox"><input id="opt-debug" type="checkbox" /> 🐛 Debug mode</label>
           </div>
         </div>
       </div>
       <div class="toolbar">
-        <button class="btn bad" id="btn-clear-selected">🗑️ Clear Selected</button>
+        <button class="btn bad" id="btn-clear-selected">🗑️ Delete Selected</button>
         <button class="btn" id="btn-edit-config">⚙️ Edit Config</button>
       </div>
     </div>
@@ -295,7 +294,7 @@
         <div class="split-2">
           <h2>Output Files</h2>
           <div class="toolbar">
-            <div class="small muted">Files are saved to your output/ folder</div>
+            <div class="small muted">Files are stored in the output list below</div>
           </div>
         </div>
         <div class="list" id="outputs-list">
@@ -311,6 +310,27 @@
   </div>
 
   <div id="toast" class="toast"></div>
+  
+  <!-- IBAN Configuration Modal -->
+  <div id="iban-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h2>⚠️ IBAN Configuration Required</h2>
+      <p>No IBAN is configured. Please enter your IBAN to continue.</p>
+      <div class="hint muted small" style="margin: 10px 0;">
+        <strong>Privacy Notice:</strong> This information is stored locally in your browser and is never sent to any server. All processing happens on your device.
+      </div>
+      <div class="row">
+        <label>💳 IBAN</label>
+        <input id="iban-input" type="text" placeholder="NL.. .." />
+      </div>
+      <div class="toolbar" style="margin-top: 16px;">
+        <button class="btn" id="iban-save">💾 Save IBAN</button>
+        <button class="btn ghost" id="iban-cancel">✖️ Cancel</button>
+      </div>
+    </div>
+  </div>
+  
   <div id="config-modal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
@@ -460,6 +480,8 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
