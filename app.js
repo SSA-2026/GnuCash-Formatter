@@ -2431,23 +2431,39 @@ function wire() {
     if (themeToggle) {
         // Init theme
         const savedTheme = localStorage.getItem('theme');
-        if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+        if (savedTheme === 'dark' || (!savedTheme && systemDark)) {
             document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
             el("#icon-theme-moon").classList.add("hidden");
             el("#icon-theme-sun").classList.remove("hidden");
+        } else {
+            document.documentElement.classList.add('light');
+            document.documentElement.classList.remove('dark');
+            el("#icon-theme-moon").classList.remove("hidden");
+            el("#icon-theme-sun").classList.add("hidden");
         }
         
         themeToggle.addEventListener("click", () => {
-            document.documentElement.classList.toggle('dark');
             const isDark = document.documentElement.classList.contains('dark');
-            localStorage.setItem('theme', isDark ? 'dark' : 'light');
             
             if (isDark) {
-                el("#icon-theme-moon").classList.add("hidden");
-                el("#icon-theme-sun").classList.remove("hidden");
-            } else {
+                // Switch to light
+                document.documentElement.classList.remove('dark');
+                document.documentElement.classList.add('light');
+                localStorage.setItem('theme', 'light');
+                
                 el("#icon-theme-moon").classList.remove("hidden");
                 el("#icon-theme-sun").classList.add("hidden");
+            } else {
+                // Switch to dark
+                document.documentElement.classList.remove('light');
+                document.documentElement.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                
+                el("#icon-theme-moon").classList.add("hidden");
+                el("#icon-theme-sun").classList.remove("hidden");
             }
         });
     }
