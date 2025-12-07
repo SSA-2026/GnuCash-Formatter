@@ -1,4 +1,4 @@
-// Invoice Formatter - Static Version
+// Invoice Formatter
 // Runs entirely in the browser using File API and local storage
 
 // Global state
@@ -17,6 +17,70 @@ let STATE = {
         abortController: null,
     }
 };
+
+// IndexedDB for handle storage
+const DB_NAME = 'InvoiceFormatterDB';
+const STORE_NAME = 'handles';
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = (e) => {
+            e.target.result.createObjectStore(STORE_NAME);
+        };
+    });
+}
+
+async function storeDirectoryHandle(handle) {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            store.put(handle, 'projectDirectory');
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) { console.error("DB Error:", e); }
+}
+
+async function getStoredDirectoryHandle() {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.get('projectDirectory');
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    } catch (e) { return null; }
+}
+
+async function clearStoredDirectoryHandle() {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            store.delete('projectDirectory');
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) { console.error("DB Error:", e); }
+}
+
+function setFavicon(status) {
+    const link = document.getElementById('favicon');
+    if (!link) return;
+    if (status === 'running') {
+        link.href = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23f08c00%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><circle cx=%2212%22 cy=%2212%22 r=%2210%22></circle><polyline points=%2212 6 12 12 16 14%22></polyline></svg>";
+    } else {
+        link.href = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22currentColor%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><path d=%22M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z%22></path><polyline points=%2214 2 14 8 20 8%22></polyline><line x1=%2216%22 y1=%2213%22 x2=%228%22 y2=%2213%22></line><line x1=%2216%22 y1=%2217%22 x2=%228%22 y2=%2217%22></line><polyline points=%2210 9 9 9 8 9%22></polyline></svg>";
+    }
+}
 
 // Default configuration (no personal information)
 const DEFAULT_CONFIG = {
@@ -93,6 +157,15 @@ function formatBytes(n) {
     return (n / Math.pow(k, i)).toFixed(i ? 1 : 0) + " " + sizes[i];
 }
 
+function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
 function timeAgo(t) {
     const d = Math.floor((Date.now() / 1000 - t) / 60);
     if (d <= 0) return "now";
@@ -137,26 +210,37 @@ function saveConfigToStorage() {
 
 function updateFolderStatus() {
     const status = el("#folder-status");
+    const btnOpen = el("#btn-select-project-folder");
+    const btnClose = el("#btn-clear-folder");
+
     if (STATE.projectFolder) {
         const inputCount = STATE.inputFiles.length;
         const outputCount = STATE.outputFiles.length;
         const hasConfig = STATE.config && STATE.ibanConfig;
         
-        let statusText = `📁 ${STATE.projectFolder.name} - `;
-        statusText += `${inputCount} input files, ${outputCount} output files`;
+        let statusText = `${STATE.projectFolder.name} — `;
+        statusText += `${inputCount} input, ${outputCount} output`;
         
         if (hasConfig) {
-            statusText += " - ✅ Config loaded";
+            statusText += " — Config loaded";
             status.style.color = "var(--good)";
         } else {
-            statusText += " - ⚠️ No config found";
+            statusText += " — No config found";
             status.style.color = "var(--warn)";
         }
         
         status.textContent = statusText;
+        
+        // Toggle buttons
+        btnOpen.classList.add("hidden");
+        btnClose.classList.remove("hidden");
     } else {
         status.textContent = "No folder selected";
         status.style.color = "var(--muted)";
+        
+        // Toggle buttons
+        btnOpen.classList.remove("hidden");
+        btnClose.classList.add("hidden");
     }
 }
 
@@ -236,88 +320,200 @@ async function savePdfToOutputFolder(pdfBlob, filename) {
     return false;
 }
 
+// Delete HTML files from output directory
+async function deleteHtmlFilesFromOutput() {
+    // Always remove HTML files from the output files list (UI)
+    const initialCount = STATE.outputFiles.length;
+    STATE.outputFiles = STATE.outputFiles.filter(f => !f.name.endsWith('.html'));
+    const removedFromList = initialCount - STATE.outputFiles.length;
+    
+    // If we have a directory handle, delete files from disk
+    if (STATE.outputDirectoryHandle) {
+        try {
+            const htmlFilesToDelete = [];
+            
+            // Find all HTML files in the output directory
+            for await (const [name, handle] of STATE.outputDirectoryHandle.entries()) {
+                if (name.endsWith('.html')) {
+                    htmlFilesToDelete.push(name);
+                }
+            }
+            
+            // Delete each HTML file
+            for (const filename of htmlFilesToDelete) {
+                try {
+                    await STATE.outputDirectoryHandle.removeEntry(filename);
+                    console.log(`Deleted HTML file from output: ${filename}`);
+                } catch (e) {
+                    console.warn(`Could not delete ${filename}:`, e);
+                }
+            }
+            
+            if (htmlFilesToDelete.length > 0) {
+                toast(`Cleaned up ${htmlFilesToDelete.length} HTML file(s) from output`, "good");
+            }
+        } catch (error) {
+            console.error('Failed to delete HTML files from output:', error);
+            throw error;
+        }
+    } else if (removedFromList > 0) {
+        console.log(`Removed ${removedFromList} HTML file(s) from output list`);
+    }
+}
+
 // PDF generation from HTML using jsPDF and html2canvas
 async function generatePdfFromHtml(htmlContent, filename) {
     return new Promise(async (resolve, reject) => {
         try {
-            // Wait for libraries to be loaded with timeout
-            const waitForLibraries = async () => {
-                const maxWaitTime = 10000; // 10 seconds
-                const checkInterval = 100; // 100ms
-                let waited = 0;
+            // Wait for libraries to load with multiple retries
+            let attempts = 0;
+            const maxAttempts = 20;
+            
+            while (attempts < maxAttempts) {
+                const jsPdfAvailable = typeof window.jsPDF !== 'undefined' || (typeof window.jspdf !== 'undefined' && typeof window.jspdf.jsPDF !== 'undefined');
+                const html2CanvasAvailable = typeof window.html2canvas !== 'undefined';
                 
-                while (waited < maxWaitTime) {
-                    if (typeof window.jsPDF !== 'undefined' && typeof window.html2canvas !== 'undefined') {
-                        return true;
-                    }
-                    await new Promise(resolve => setTimeout(resolve, checkInterval));
-                    waited += checkInterval;
+                if (jsPdfAvailable && html2CanvasAvailable) {
+                    break;
                 }
-                return false;
-            };
-
-            // Check if jsPDF and html2canvas are loaded
-            const librariesLoaded = await waitForLibraries();
-            if (!librariesLoaded) {
-                throw new Error('PDF libraries failed to load. Please check your internet connection and refresh the page.');
+                
+                attempts++;
+                if (attempts % 5 === 0) console.log(`Waiting for PDF libraries... attempt ${attempts}/${maxAttempts}`);
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            
+            // Resolve jsPDF constructor
+            let jsPDFConstructor = null;
+            if (typeof window.jsPDF !== 'undefined') {
+                jsPDFConstructor = window.jsPDF;
+            } else if (typeof window.jspdf !== 'undefined' && typeof window.jspdf.jsPDF !== 'undefined') {
+                jsPDFConstructor = window.jspdf.jsPDF;
+            }
+            
+            const html2CanvasAvailable = typeof window.html2canvas !== 'undefined';
+            
+            if (!jsPDFConstructor || !html2CanvasAvailable) {
+                console.error('PDF Libraries missing. window.jspdf:', window.jspdf, 'window.jsPDF:', window.jsPDF);
+                throw new Error(`PDF libraries not available. jsPDF: ${!!jsPDFConstructor}, html2canvas: ${html2CanvasAvailable}. Please refresh the page.`);
             }
 
-            // Create a temporary container for the HTML content
-            const tempContainer = document.createElement('div');
-            tempContainer.style.position = 'absolute';
-            tempContainer.style.left = '-9999px';
-            tempContainer.style.top = '0';
-            tempContainer.style.width = '1006px'; // Match the banner width
-            tempContainer.style.backgroundColor = 'white';
-            tempContainer.innerHTML = htmlContent;
-            document.body.appendChild(tempContainer);
+            // Create an iframe to render the content in isolation
+            // This avoids style contamination and handles full HTML documents correctly
+            const iframe = document.createElement('iframe');
+            iframe.style.position = 'absolute';
+            iframe.style.left = '-9999px';
+            iframe.style.width = '1006px';
+            iframe.style.height = '0';
+            iframe.style.border = 'none';
+            document.body.appendChild(iframe);
 
-            // Wait a bit for images to load
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            const doc = iframe.contentDocument || iframe.contentWindow.document;
+            
+            // Sanitize HTML content to remove unsupported color functions
+            // Also replace any other modern color functions that might cause issues
+            let sanitizedHtml = htmlContent
+                .replace(/oklch\([^)]+\)/gi, '#000000')
+                .replace(/oklab\([^)]+\)/gi, '#000000')
+                .replace(/lch\([^)]+\)/gi, '#000000')
+                .replace(/lab\([^)]+\)/gi, '#000000');
+            
+            doc.open();
+            doc.write(sanitizedHtml);
+            
+            // Inject style to force light scheme and override potential oklch sources
+            const style = doc.createElement('style');
+            style.textContent = `
+                :root { color-scheme: light; }
+                * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            `;
+            if (doc.head) {
+                doc.head.appendChild(style);
+            } else {
+                doc.body.appendChild(style);
+            }
+            
+            doc.close();
 
-            // Use html2canvas to capture the HTML as an image
-            const canvas = await html2canvas(tempContainer, {
-                scale: 2, // Higher quality
-                useCORS: true,
-                allowTaint: true,
-                backgroundColor: '#ffffff',
-                width: 1006,
-                windowWidth: 1006
+            // Wait for images to load
+            const images = doc.querySelectorAll('img');
+            const imagePromises = Array.from(images).map(img => {
+                return new Promise((resolve) => {
+                    if (img.complete) {
+                        resolve();
+                    } else {
+                        img.onload = resolve;
+                        img.onerror = resolve;
+                        setTimeout(resolve, 3000);
+                    }
+                });
             });
 
-            // Remove the temporary container
-            document.body.removeChild(tempContainer);
+            await Promise.all(imagePromises);
+            await new Promise(resolve => setTimeout(resolve, 500)); // Extra wait for rendering
 
-            // Create PDF
-            const { jsPDF } = window.jsPDF;
-            const pdf = new jsPDF({
-                orientation: 'portrait',
-                unit: 'mm',
-                format: 'a4'
-            });
+            try {
+                // Use html2canvas to capture the iframe body
+                const canvas = await html2canvas(doc.body, {
+                    scale: 2,
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff',
+                    width: 1006,
+                    windowWidth: 1006,
+                    height: doc.body.scrollHeight, // Use body height
+                    logging: false,
+                    window: iframe.contentWindow, // Use iframe window context
+                    onclone: (clonedDoc) => {
+                        const style = clonedDoc.createElement('style');
+                        style.textContent = `
+                            @page { margin: 0; }
+                            html, body { margin: 0 !important; }
+                            table { border-collapse: collapse !important; border-spacing: 0 !important; }
+                        `;
+                        clonedDoc.head.appendChild(style);
+                    }
+                });
 
-            // Calculate dimensions to fit the content properly
-            const imgWidth = 210; // A4 width in mm
-            const pageHeight = 297; // A4 height in mm
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
-            let heightLeft = imgHeight;
-            let position = 0;
+                // Remove the iframe
+                document.body.removeChild(iframe);
 
-            // Add the image to PDF
-            pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight);
-            heightLeft -= pageHeight;
+                // Create PDF using the resolved constructor
+                const pdf = new jsPDFConstructor({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: 'a4'
+                });
 
-            // Add new pages if content is longer than one page
-            while (heightLeft >= 0) {
-                position = heightLeft - imgHeight;
-                pdf.addPage();
-                pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight);
+                // Calculate dimensions to fit the content properly
+                const imgWidth = 210; // A4 width in mm
+                const pageHeight = 297; // A4 height in mm
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                // Add the image to PDF with no margins to match Playwright
+                pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', 0, position, imgWidth, imgHeight);
                 heightLeft -= pageHeight;
-            }
 
-            // Generate PDF blob
-            const pdfBlob = pdf.output('blob');
-            resolve(pdfBlob);
+                // Add new pages if content is longer than one page
+                while (heightLeft >= 0) {
+                    position = heightLeft - imgHeight;
+                    pdf.addPage();
+                    pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+
+                // Generate PDF blob
+                const pdfBlob = pdf.output('blob');
+                resolve(pdfBlob);
+
+            } catch (canvasError) {
+                // Clean up iframe if canvas generation fails
+                if (document.body.contains(iframe)) {
+                    document.body.removeChild(iframe);
+                }
+                throw canvasError;
+            }
 
         } catch (error) {
             console.error('PDF generation failed:', error);
@@ -426,6 +622,9 @@ async function selectProjectFolderWithFileSystem() {
             STATE.projectDirectoryHandle = directoryHandle;
             STATE.outputDirectoryHandle = outputHandle;
             
+            // Save handle to DB
+            await storeDirectoryHandle(directoryHandle);
+
             // Load files from the subdirectories
             await loadFilesFromDirectoryStructure(inputHandle, outputHandle, configHandle);
             
@@ -714,13 +913,15 @@ async function handleProjectFolder(files) {
     }
 }
 
-function clearProjectFolder() {
+async function clearProjectFolder() {
     STATE.projectFolder = null;
     STATE.inputFiles = [];
     STATE.outputFiles = [];
     STATE.selectedInputs.clear();
     STATE.selectedOutputs.clear();
     
+    await clearStoredDirectoryHandle();
+
     renderInputs();
     renderOutputs();
     updateFolderStatus();
@@ -733,9 +934,9 @@ function parseSimpleYaml(text) {
     const lines = text.split('\n');
     const stack = [{ obj: result, indent: -1 }];
     
-    for (let line of lines) {
-        const originalLine = line;
-        line = line.trim();
+    for (let i = 0; i < lines.length; i++) {
+        const originalLine = lines[i];
+        const line = originalLine.trim();
         
         // Skip empty lines and comments
         if (!line || line.startsWith('#')) continue;
@@ -769,17 +970,32 @@ function parseSimpleYaml(text) {
                 // Quoted string
                 current[key] = valuePart.slice(1, -1);
             } else if (valuePart === '|') {
-                // Multiline string (simplified - just take next non-empty line)
-                const nextLineIndex = lines.indexOf(originalLine) + 1;
-                let multilineValue = '';
-                for (let i = nextLineIndex; i < lines.length; i++) {
-                    const nextLine = lines[i].trim();
-                    if (nextLine && !nextLine.startsWith('#')) {
-                        multilineValue = nextLine.replace(/^["']|["']$/g, '');
-                        break;
+                // Multiline string
+                let multilineValue = [];
+                let baseIndent = -1;
+                
+                // Look ahead for indented lines
+                while (i + 1 < lines.length) {
+                    const nextLineOriginal = lines[i + 1];
+                    const nextLineTrimmed = nextLineOriginal.trim();
+                    
+                    if (!nextLineTrimmed) {
+                        i++; // Skip empty lines but keep going
+                        continue;
+                    }
+                    
+                    const nextIndent = nextLineOriginal.search(/\S/);
+                    
+                    if (baseIndent === -1) baseIndent = nextIndent;
+                    
+                    if (nextIndent > indent) {
+                        multilineValue.push(nextLineTrimmed);
+                        i++;
+                    } else {
+                        break; // End of indented block
                     }
                 }
-                current[key] = multilineValue;
+                current[key] = multilineValue.join('\n');
             } else {
                 // Unquoted string
                 current[key] = valuePart.replace(/^["']|["']$/g, '');
@@ -951,20 +1167,23 @@ function parseDateString(dateStr, format) {
     return null;
 }
 
-function buildImprovedHtml(data, config, ibanConfig) {
+function buildImprovedHtml(data, config, ibanConfig, bannerDataUrl) {
     const c = config || {};
     const iban = ibanConfig || {};
     
     let bannerHtml = "";
-    if (c.banner_path) {
-        // If using File System Access API, construct the path relative to the project directory
-        if (STATE.projectDirectoryHandle && !c.banner_path.startsWith('http') && !c.banner_path.startsWith('data:')) {
-            // For relative paths, assume they're in the config directory
-            const bannerPath = c.banner_path.startsWith('./') ? c.banner_path.substring(2) : c.banner_path;
-            bannerHtml = `<tr><td align="left"><img src="./config/${bannerPath}" alt="Invoice Banner" onerror="this.style.display='none'; this.alt='Banner not found: config/${bannerPath}';" /></td></tr>`;
+    
+    if (bannerDataUrl) {
+        // Use the pre-loaded data URL
+        bannerHtml = `<tr><td align="left"><img src="${bannerDataUrl}" alt="Invoice Banner" style="width: 100%;" /></td></tr>`;
+    } else if (c.banner_path) {
+        // Fallback for when not using File System API or if loading failed
+        if (c.banner_path.startsWith('http') || c.banner_path.startsWith('data:')) {
+            bannerHtml = `<tr><td align="left"><img src="${escapeHtml(c.banner_path)}" alt="Invoice Banner" style="width: 100%;" onerror="this.style.display='none'; this.alt='Banner not found: ${escapeHtml(c.banner_path)}';" /></td></tr>`;
         } else {
-            // For absolute URLs or data URLs, use as-is
-            bannerHtml = `<tr><td align="left"><img src="${escapeHtml(c.banner_path)}" alt="Invoice Banner" onerror="this.style.display='none'; this.alt='Banner not found: ${escapeHtml(c.banner_path)}';" /></td></tr>`;
+            // Try relative path (might fail if not served correctly)
+            const bannerPath = c.banner_path.startsWith('./') ? c.banner_path.substring(2) : c.banner_path;
+            bannerHtml = `<tr><td align="left"><img src="config/${bannerPath}" alt="Invoice Banner" style="width: 100%;" onerror="this.style.display='none'; this.alt='Banner not found: config/${bannerPath}';" /></td></tr>`;
         }
     }
     
@@ -1046,7 +1265,7 @@ function buildImprovedHtml(data, config, ibanConfig) {
     }
     
     const summaryColspan = Math.max(1, headers.length - 1);
-    const summaryHtml = summaryRows.map(([label, value]) => 
+    const summaryHtml = summaryRows.map(([label, value]) =>
         `<tr bgcolor="#ffffff"><td class="total-label-cell">${escapeHtml(label)}</td>` +
         `<td class="total-number-cell" colspan="${summaryColspan}">${escapeHtml(value)}</td></tr>`
     ).join('');
@@ -1084,229 +1303,135 @@ function buildImprovedHtml(data, config, ibanConfig) {
     const showDate = dateSettings.show_date !== false && data.date;
     const showDueDate = dateSettings.show_due_date !== false && data.due_date;
     
+    // Use the exact same HTML structure as the Python version
     return `<!DOCTYPE html>
 <html dir='auto'>
 <head>
 <meta http-equiv="content-type" content="text/html; charset=utf-8" />
 <style type="text/css">
-@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap');
-
-* {
-    box-sizing: border-box;
-}
-
-body {
-    font-family: "Open Sans", sans-serif;
-    background-color: #ffffff;
-    color: #000000;
-    margin: 0;
-    padding: 20px;
-    line-height: 1.4;
-}
-
-.invoice-container {
-    max-width: 1006px;
-    margin: 0 auto;
-    background: white;
-    padding: 0;
-}
-
 img {
-    max-width: 100%;
-    width: 1006px;
+    width: 100%;
+    height: auto;
     display: block;
     margin-left: auto;
     margin-right: auto;
-    height: auto;
 }
-
-h3 {
-    font-family: "Open Sans", sans-serif;
-    font-size: 15pt;
-    font-weight: bold;
-    margin: 10px 0;
-}
-
-a {
-    font-family: "Open Sans", sans-serif;
-    font-size: 10pt;
-    font-style: italic;
-}
-
-table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 0;
-}
-
-table td, table th {
-    border: 1px solid #ccc;
-    padding: 8px;
-    vertical-align: top;
-    font-family: "Open Sans", sans-serif;
-    font-size: 11pt;
-}
-
-th {
-    background-color: #f5f5f5;
-    font-weight: 600;
-    text-align: left;
-}
-
-.number-cell, .total-number-cell {
-    text-align: right;
-    white-space: nowrap;
-    font-family: "Open Sans", sans-serif;
-    font-size: 12pt;
-}
-
-.total-label-cell {
-    font-family: "Open Sans", sans-serif;
-    font-size: 12pt;
-    font-weight: 600;
-}
-
-.total-number-cell {
-    font-weight: 600;
-}
-
-.date-cell {
-    white-space: nowrap;
-}
-
-.invoice-title {
-    font-size: 18pt;
-    font-weight: bold;
-    margin: 20px 0;
-    text-align: center;
-}
-
-.company-name, .client-name {
-    font-size: 16pt;
-    font-weight: 600;
-    margin: 0 0 5px 0;
-    line-height: 1.25;
-}
-
-.client-address, .company-address {
-    font-size: 11pt;
-    line-height: 1.4;
-    margin: 0;
-}
-
-.invoice-details-table td {
-    padding: 4px 8px;
-    border: none;
-}
-
-.invoice-details-table td:first-child {
-    font-weight: 600;
-}
-
-.entries-table {
-    margin: 20px 0;
-}
-
-.entries-table th {
-    background-color: #92a7b6;
-    color: white;
-    font-weight: 600;
-    text-align: left;
-    padding: 10px 8px;
-}
-
-.entries-table td {
-    border: 1px solid #ddd;
-    padding: 8px;
-}
-
-.entries-table tr:nth-child(even) {
-    background-color: #f9f9f9;
-}
-
-.entries-table tr:first-child td {
-    background-color: #92a7b6;
-    color: white;
-    font-weight: 600;
-}
-
-.invoice-notes {
-    margin-top: 30px;
-    font-size: 11pt;
-    line-height: 1.6;
-    white-space: pre-line;
-}
-
-.div-align-right {
-    text-align: right;
-}
-
-.div-align-right .maybe-align-right {
-    text-align: right;
-}
-
-@media print {
-    body {
-        margin: 0;
-        padding: 0;
-        background: white;
-    }
-    
-    .invoice-container {
-        margin: 0;
-        max-width: 100%;
-    }
-    
-    .entries-table tr {
-        page-break-inside: avoid;
-    }
-    
-    .invoice-notes {
-        page-break-inside: avoid;
-    }
-}
+@media (prefers-color-scheme: dark) {body {color: #000; background-color: #fff;}}
+h3 { font-family: "Open Sans", sans-serif; font-size: 18pt; font-weight: bold; }
+a { font-family: "Open Sans", sans-serif; font-size: 12pt; font-style: italic; }
+body, p, table, tr, td { vertical-align: top; font-family: "Open Sans", sans-serif; font-size: 13pt; }
+tr.alternate-row { background: #ffffff }
+tr { page-break-inside: avoid !important;}
+html, body { height: 100vh; margin: 0 8px; }
+td, th { border-color: grey }
+th.column-heading-left { text-align: left; font-family: "Open Sans", sans-serif; font-size: 12pt; }
+th.column-heading-center { text-align: center; font-family: "Open Sans", sans-serif; font-size: 12pt; }
+th.column-heading-right { text-align: right; font-family: "Open Sans", sans-serif; font-size: 12pt; }
+td.highlight {background-color:#e1e1e1}
+td.neg { color: red; }
+td.number-cell, td.total-number-cell { text-align: right; white-space: nowrap; }
+td.date-cell { white-space: nowrap; }
+td.anchor-cell { white-space: nowrap; font-family: "Open Sans", sans-serif; font-size: 13pt; }
+td.number-cell { font-family: "Open Sans", sans-serif; font-size: 14pt; }
+td.number-header { text-align: right; font-family: "Open Sans", sans-serif; font-size: 12pt; }
+td.text-cell { font-family: "Open Sans", sans-serif; font-size: 13pt; }
+td.total-number-cell { font-family: "Open Sans", sans-serif; font-size: 14pt; }
+td.total-label-cell { font-family: "Open Sans", sans-serif; font-size: 14pt; }
+td.centered-label-cell { text-align: center; font-family: "Open Sans", sans-serif; font-size: 14pt; font-weight: bold; }
+sub { top: 0.4em; }
+sub, sup { vertical-align: baseline; position: relative; top: -0.4em; }
+@media print { html, body { height: unset; }}
+.div-align-right { float: right; }
+.div-align-right .maybe-align-right { text-align: right }
+.entries-table * { border-width: 1px; border-style:solid; border-collapse: collapse}
+.entries-table > table { width: 100% }
+.company-table > table * { padding: 0px; }
+.client-table > table * { padding: 0px; }
+.invoice-details-table > table * { padding: 0px; text-indent: 0.2em; }
+.main-table > table { width: 80%; }
+.company-name, .client-name { font-size: x-large; margin: 0; line-height: 1.25; }
+.client-table .client-name { text-align: left; }
+.client-table .maybe-align-right { text-align: left; }
+.invoice-title { font-weight: bold; }
+.invoice-notes { margin-top: 0; width: 100%; }
 </style>
 </head>
-<body>
-<div class="invoice-container">
+<body text="#000000" link="#1c3661" bgcolor="#ffffff">
+<table cellspacing="1" cellpadding="1" border="0" width="100%" style="margin-left:auto; margin-right:auto; max-width: 1006px;">
+  <tbody>
     ${bannerHtml}
-    
-    <div class="invoice-title">Invoice #${escapeHtml(data.invoice_number || "")}</div>
-    
-    <table style="margin-bottom: 30px;">
-        <tr>
-            <td style="width: 50%; vertical-align: top; padding-right: 20px;">
-                <div class="client-name">${data.client_name_html || ""}</div>
-                <div class="client-address">${data.client_address_html || ""}</div>
-            </td>
-            <td style="width: 50%; vertical-align: top; text-align: right;">
-                <div class="company-name">${data.company_name_html || ""}</div>
-                <div class="company-address">${data.company_address_html || ""}</div>
-                
-                <div class="invoice-details-table" style="margin-top: 20px;">
-                    <table>
-                        ${showDate ? `<tr><td>Date:</td><td style="text-align: right;">${escapeHtml(data.date || "")}</td></tr>` : ''}
-                        ${showDueDate ? `<tr><td>Due Date:</td><td style="text-align: right;">${escapeHtml(data.due_date || "")}</td></tr>` : ''}
+    <tr><td><h3></h3></td></tr>
+    <tr><td>
+      <div class="main-table">
+        <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
+          <tbody>
+            <tr><td colspan="2"><div class="invoice-title">Invoice #${escapeHtml(data.invoice_number || "")}</div></td></tr>
+            <tr>
+              <td> </td>
+              <td>
+                <div class="div-align-right">
+                  <div class="invoice-details-table">
+                  <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
+                    <tbody>
+                      ${showDate ? `<tr><td>Date:</td><td><div class="div-align-right">${escapeHtml(data.date || "")}</div></td></tr>` : ''}
+                        ${showDueDate ? `<tr><td>Due Date:</td><td><div class="div-align-right">${escapeHtml(data.due_date || "")}</div></td></tr>` : ''}
+                      </tbody>
                     </table>
+                  </div>
                 </div>
-            </td>
-        </tr>
-    </table>
-    
-    <div class="entries-table">
-        <table>
-            <thead>
-                <tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>
-            </thead>
-            <tbody>
-                ${itemRows.join('')}
-                ${summaryHtml}
-            </tbody>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <div class="client-table">
+                  <table cellspacing="1" cellpadding="1" border="0" style="margin-left:0; margin-right:0">
+                    <tbody>
+                      <tr><td><div class="maybe-align-right client-name">${data.client_name_html || ""}</div></td></tr>
+                      <tr><td><div class="maybe-align-right client-address">${data.client_address_html || ""}</div></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </td>
+              <td>
+                <div class="div-align-right">
+                  <div class="company-table">
+                    <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
+                      <tbody>
+                        <tr><td><div class="maybe-align-right company-name">${data.company_name_html || ""}</div></td></tr>
+                        <tr><td><div class="maybe-align-right company-address">${data.company_address_html || ""}</div></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr><td> </td><td><div class="div-align-right"> </div></td></tr>
+            <tr>
+              <td colspan="2">
+                <div class="entries-table">
+                  <table cellspacing="1" cellpadding="1" border="0" style="margin-left:auto; margin-right:auto">
+                    <thead>
+                      <tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>
+                    </thead>
+                    <tbody>
+                      ${itemRows.join('')}
+                      ${summaryHtml}
+                    </tbody>
+                  </table>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td colspan="2">
+                <div class="invoice-notes">${notesHtml}</div>
+              </td>
+            </tr>
+          </tbody>
         </table>
-    </div>
-    
-    <div class="invoice-notes">${notesHtml}</div>
-</div>
+      </div>
+    </td></tr>
+  </tbody>
+</table>
 </body>
 </html>`;
 }
@@ -1314,16 +1439,20 @@ th {
 // UI rendering
 function renderInputs() {
     const box = el("#inputs-list");
-    const dropZone = el("#drop-zone");
+    const dropZone = el("#drop-zone-inline");
+    const countBadge = el("#count-inputs");
+    
+    // Update count
+    if (countBadge) countBadge.textContent = STATE.inputFiles.length;
     
     if (STATE.inputFiles.length === 0) {
         box.classList.add("hidden");
-        dropZone.classList.remove("hidden");
+        if (dropZone) dropZone.classList.remove("hidden");
         return;
     }
     
     box.classList.remove("hidden");
-    dropZone.classList.add("hidden");
+    if (dropZone) dropZone.classList.add("hidden");
     
     // Clear existing rows
     els(".rowi", box).forEach(n => n.remove());
@@ -1335,16 +1464,20 @@ function renderInputs() {
             <div><input type="checkbox" class="pick" data-id="${file.id}" /></div>
             <div class="mono" title="${file.name}">${file.name}<div class="pill">${formatBytes(file.size)}</div></div>
             <div class="actions">
-                <button class="btn ghost small preview" data-id="${file.id}">👁️ Preview</button>
-                <button class="btn ghost small remove" data-id="${file.id}">🗑️ Remove</button>
+                <button class="btn ghost icon-only preview" data-id="${file.id}" title="Preview">
+                    <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                </button>
+                <button class="btn ghost icon-only edit" data-id="${file.id}" title="Edit Data">
+                    <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                </button>
             </div>
         `;
         box.appendChild(row);
         
         const checkbox = row.querySelector("input.pick");
         checkbox.checked = STATE.selectedInputs.has(file.id);
-        checkbox.addEventListener("change", () => {
-            if (checkbox.checked) {
+        checkbox.addEventListener("change", (e) => {
+            if (e.target.checked) {
                 STATE.selectedInputs.add(file.id);
             } else {
                 STATE.selectedInputs.delete(file.id);
@@ -1355,9 +1488,9 @@ function renderInputs() {
         row.querySelector("button.preview").addEventListener("click", () => {
             previewInputFile(file);
         });
-        
-        row.querySelector("button.remove").addEventListener("click", () => {
-            removeInputFile(file.id);
+
+        row.querySelector("button.edit").addEventListener("click", () => {
+            openEditModal(file);
         });
     });
     
@@ -1366,9 +1499,25 @@ function renderInputs() {
 
 function renderOutputs() {
     const box = el("#outputs-list");
+    const countBadge = el("#count-outputs");
+    
+    // Update count
+    if (countBadge) countBadge.textContent = STATE.outputFiles.length;
     
     // Clear existing rows
     els(".rowi", box).forEach(n => n.remove());
+    
+    if (STATE.outputFiles.length === 0) {
+        const emptyRow = document.createElement("div");
+        emptyRow.className = "rowi";
+        emptyRow.style.justifyContent = "center";
+        emptyRow.style.color = "var(--muted)";
+        emptyRow.style.padding = "20px";
+        emptyRow.style.display = "flex";
+        emptyRow.textContent = "No output files yet";
+        box.appendChild(emptyRow);
+        return;
+    }
     
     STATE.outputFiles.forEach(file => {
         const row = document.createElement("div");
@@ -1377,9 +1526,12 @@ function renderOutputs() {
             <div><input type="checkbox" class="pick" data-id="${file.id}" /></div>
             <div class="mono" title="${file.name}">${file.name}<div class="pill">${formatBytes(file.size)}</div></div>
             <div class="actions">
-                <button class="btn ghost small preview" data-id="${file.id}">👁️ Preview</button>
-                <button class="btn ghost small download" data-id="${file.id}">📥 Download</button>
-                <button class="btn ghost small print" data-id="${file.id}">🖨️ Print</button>
+                <button class="btn ghost icon-only preview" data-id="${file.id}" title="Preview">
+                    <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                </button>
+                <button class="btn ghost icon-only print" data-id="${file.id}" title="Print">
+                    <svg viewBox="0 0 24 24"><path d="M19 8h-1V3H6v5H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zM8 5h8v3H8V5zm8 12v2H8v-4h8v2zm2-2v-2H6v2H4v-4c0-.55.45-1 1-1h14c.55 0 1 .45 1 1v4h-2z"/><circle cx="18" cy="11.5" r="1"/></svg>
+                </button>
             </div>
         `;
         box.appendChild(row);
@@ -1397,10 +1549,6 @@ function renderOutputs() {
         
         row.querySelector("button.preview").addEventListener("click", () => {
             previewOutputFile(file);
-        });
-        
-        row.querySelector("button.download").addEventListener("click", () => {
-            downloadOutputFile(file);
         });
         
         row.querySelector("button.print").addEventListener("click", () => {
@@ -1457,39 +1605,158 @@ function addInputFiles(files) {
     }
 }
 
-function removeInputFile(fileId) {
+async function removeInputFile(fileId) {
+    const file = STATE.inputFiles.find(f => f.id === fileId);
+    if (!file) return;
+
     STATE.inputFiles = STATE.inputFiles.filter(f => f.id !== fileId);
     STATE.selectedInputs.delete(fileId);
     renderInputs();
+
+    // Remove from disk if project folder is open
+    if (STATE.projectDirectoryHandle) {
+        try {
+            const inputHandle = await STATE.projectDirectoryHandle.getDirectoryHandle('input');
+            await inputHandle.removeEntry(file.name);
+            console.log(`Deleted input file from disk: ${file.name}`);
+        } catch (e) {
+            console.error(`Failed to delete ${file.name} from disk:`, e);
+            toast(`Failed to delete file from disk: ${e.message}`, "warn");
+        }
+    }
 }
 
 async function previewInputFile(fileObj) {
+    const modal = el("#preview-modal");
+    const frame = el("#preview-frame");
+    
     try {
-        const text = await fileObj.file.text();
-        const newWindow = window.open('', '_blank');
-        newWindow.document.write(text);
-        newWindow.document.close();
+        const content = await fileObj.file.text();
+        
+        if (!content) {
+            toast("Cannot preview HTML: Content missing", "bad");
+            return;
+        }
+
+        frame.src = 'about:blank';
+        setTimeout(() => {
+            const doc = frame.contentDocument || frame.contentWindow.document;
+            doc.open();
+            doc.write(content);
+            doc.close();
+        }, 10);
+        
+        modal.classList.remove("hidden");
     } catch (e) {
+        console.error("Failed to preview file", e);
         toast("Failed to preview file", "bad");
     }
 }
 
-function previewOutputFile(fileObj) {
-    const newWindow = window.open('', '_blank');
-    newWindow.document.write(fileObj.content);
-    newWindow.document.close();
+async function previewOutputFile(fileObj) {
+    const modal = el("#preview-modal");
+    const frame = el("#preview-frame");
+    
+    if (fileObj.type === 'pdf') {
+        let blob = fileObj.content;
+        
+        // If no content but we have a file handle/object (from disk load), use that
+        if (!blob && fileObj.file) {
+            blob = fileObj.file;
+        }
+        
+        // Ensure it's a blob
+        if (blob && !(blob instanceof Blob)) {
+            blob = new Blob([blob], { type: 'application/pdf' });
+        }
+        
+        if (!blob) {
+            toast("Cannot preview PDF: Content missing", "bad");
+            return;
+        }
+
+        const url = URL.createObjectURL(blob);
+        frame.src = url;
+        // Clean up URL when modal closes (handled in close handler)
+        frame.dataset.url = url;
+    } else {
+        // HTML
+        let content = fileObj.content;
+        
+        // If no content but we have a file handle/object, read it
+        if (!content && fileObj.file) {
+            try {
+                content = await fileObj.file.text();
+            } catch (e) {
+                console.error("Failed to read file", e);
+                toast("Failed to read file content", "bad");
+                return;
+            }
+        }
+        
+        if (!content) {
+            toast("Cannot preview HTML: Content missing", "bad");
+            return;
+        }
+
+        frame.src = 'about:blank';
+        setTimeout(() => {
+            const doc = frame.contentDocument || frame.contentWindow.document;
+            doc.open();
+            doc.write(content);
+            doc.close();
+        }, 10);
+    }
+    
+    modal.classList.remove("hidden");
 }
 
-function downloadOutputFile(fileObj) {
-    const mimeType = fileObj.type === 'pdf' ? 'application/pdf' : 'text/html';
-    downloadFile(fileObj.content, fileObj.name, mimeType);
-}
+async function printOutputFile(fileObj) {
+    if (fileObj.type === 'pdf') {
+        let blob = fileObj.content;
+        
+        if (!blob && fileObj.file) {
+            blob = fileObj.file;
+        }
+        
+        if (blob && !(blob instanceof Blob)) {
+            blob = new Blob([blob], { type: 'application/pdf' });
+        }
+        
+        if (!blob) {
+            toast("Cannot print PDF: Content missing", "bad");
+            return;
+        }
 
-function printOutputFile(fileObj) {
-    const newWindow = window.open('', '_blank');
-    newWindow.document.write(fileObj.content);
-    newWindow.document.close();
-    newWindow.print();
+        const url = URL.createObjectURL(blob);
+        const newWindow = window.open(url, '_blank');
+        // Note: Automatically printing a PDF blob in a new window is restricted in some browsers
+        // The user will see the PDF and can print from there
+    } else {
+        let content = fileObj.content;
+        
+        if (!content && fileObj.file) {
+            try {
+                content = await fileObj.file.text();
+            } catch (e) {
+                toast("Failed to read file content", "bad");
+                return;
+            }
+        }
+
+        if (!content) {
+            toast("Cannot print HTML: Content missing", "bad");
+            return;
+        }
+
+        const newWindow = window.open('', '_blank');
+        newWindow.document.write(content);
+        newWindow.document.close();
+        setTimeout(() => {
+            newWindow.print();
+            newWindow.close();
+        }, 500);
+    }
 }
 
 // Conversion process
@@ -1505,23 +1772,43 @@ async function convertFiles(selectedOnly = false) {
         return;
     }
     
-    const filesToConvert = selectedOnly ?
-        STATE.inputFiles.filter(f => STATE.selectedInputs.has(f.id)) :
-        STATE.inputFiles;
+    let filesToConvert = [];
+    
+    if (selectedOnly) {
+        filesToConvert = STATE.inputFiles.filter(f => STATE.selectedInputs.has(f.id));
+        // If "Convert Selected" was clicked but nothing selected, fallback to all files
+        if (filesToConvert.length === 0 && STATE.inputFiles.length > 0) {
+            console.log("No files selected, falling back to converting all files");
+            filesToConvert = STATE.inputFiles;
+            toast("Converting all files...", "good");
+        }
+    } else {
+        filesToConvert = STATE.inputFiles;
+    }
     
     if (filesToConvert.length === 0) {
-        toast("No files to convert", "warn");
+        toast("No input files found. Please add HTML files first.", "warn");
         return;
     }
     
     STATE.conversion.isRunning = true;
+    setFavicon('running');
     showProgress(true);
     updateProgress(0, "Starting conversion...");
     
     const keepHtml = el("#opt-keep-html").checked;
-    const generatePdf = el("#opt-generate-pdf").checked;
+    const generatePdf = true; // Always generate PDF
     const debug = el("#opt-debug").checked;
     const overwrite = el("#opt-overwrite").checked;
+    
+    // If keep HTML is disabled, delete existing HTML files from output
+    if (!keepHtml) {
+        try {
+            await deleteHtmlFilesFromOutput();
+        } catch (error) {
+            console.error('Failed to delete HTML files from output:', error);
+        }
+    }
     
     let converted = 0;
     let errors = 0;
@@ -1535,14 +1822,40 @@ async function convertFiles(selectedOnly = false) {
                 `Processing ${fileObj.name} (${i + 1}/${filesToConvert.length})...`
             );
             
-            const html = await fileObj.file.text();
-            const data = parseEasyInvoice(html);
+            let data;
+            // Use edited data if available
+            if (fileObj.parsedData && fileObj.isEdited) {
+                data = fileObj.parsedData;
+                console.log(`Using edited data for ${fileObj.name}`);
+            } else {
+                const html = await fileObj.file.text();
+                data = parseEasyInvoice(html);
+            }
             
             if (!data.invoice_number) {
                 console.warn(`Could not extract invoice number from ${fileObj.name}`);
             }
             
-            const improvedHtml = buildImprovedHtml(data, STATE.config, STATE.ibanConfig);
+            // Load banner if configured
+            let bannerDataUrl = null;
+            if (STATE.config.banner_path && STATE.projectDirectoryHandle && !STATE.config.banner_path.startsWith('http') && !STATE.config.banner_path.startsWith('data:')) {
+                try {
+                    // Clean up path to get just the filename
+                    let bannerFilename = STATE.config.banner_path;
+                    if (bannerFilename.startsWith('./')) bannerFilename = bannerFilename.substring(2);
+                    if (bannerFilename.startsWith('config/')) bannerFilename = bannerFilename.substring(7);
+                    
+                    // We assume it's in the config directory
+                    const configHandle = await STATE.projectDirectoryHandle.getDirectoryHandle('config');
+                    const fileHandle = await configHandle.getFileHandle(bannerFilename);
+                    const file = await fileHandle.getFile();
+                    bannerDataUrl = await readFileAsDataURL(file);
+                } catch (e) {
+                    console.warn("Could not load banner from project:", e);
+                }
+            }
+            
+            const improvedHtml = buildImprovedHtml(data, STATE.config, STATE.ibanConfig, bannerDataUrl);
             
             // Generate filename
             const clientName = collapseWs(stripTags(data.client_name_html || ""));
@@ -1561,11 +1874,14 @@ async function convertFiles(selectedOnly = false) {
                 };
                 
                 // Check for overwrite
-                if (!overwrite) {
-                    const existingIndex = STATE.outputFiles.findIndex(f => f.name === htmlFileObj.name);
-                    if (existingIndex !== -1) {
+                const existingHtmlIndex = STATE.outputFiles.findIndex(f => f.name === htmlFileObj.name);
+                if (existingHtmlIndex !== -1) {
+                    if (!overwrite) {
                         console.log(`Skipping ${htmlFileObj.name} - already exists (overwrite disabled)`);
                         continue;
+                    } else {
+                        // Remove existing file from state to avoid duplicates
+                        STATE.outputFiles.splice(existingHtmlIndex, 1);
                     }
                 }
                 
@@ -1588,11 +1904,14 @@ async function convertFiles(selectedOnly = false) {
                     };
                     
                     // Check for overwrite
-                    if (!overwrite) {
-                        const existingIndex = STATE.outputFiles.findIndex(f => f.name === pdfFileObj.name);
-                        if (existingIndex !== -1) {
+                    const existingPdfIndex = STATE.outputFiles.findIndex(f => f.name === pdfFileObj.name);
+                    if (existingPdfIndex !== -1) {
+                        if (!overwrite) {
                             console.log(`Skipping ${pdfFileObj.name} - already exists (overwrite disabled)`);
                             continue;
+                        } else {
+                            // Remove existing file from state to avoid duplicates
+                            STATE.outputFiles.splice(existingPdfIndex, 1);
                         }
                     }
                     
@@ -1658,6 +1977,7 @@ async function convertFiles(selectedOnly = false) {
     }, 1000);
     
     STATE.conversion.isRunning = false;
+    setFavicon('idle');
 }
 
 // Progress handling
@@ -1681,32 +2001,32 @@ function renderConfigModal() {
     const c = STATE.config || {};
     const iban = STATE.ibanConfig || {};
     
-    // General tab
+    // General
     el("#cfg-banner").value = c.banner_path || "";
-    
-    // Add banner preview if path exists
     updateBannerPreview(c.banner_path);
-    el("#cfg-treasurer-name").value = (c.treasurer && c.treasurer.name) || "";
-    el("#cfg-treasurer-email").value = (c.treasurer && c.treasurer.email) || "";
-    el("#cfg-treasurer-title").value = (c.treasurer && c.treasurer.title) || "";
     el("#cfg-payment-request").value = c.payment_request || "";
     el("#cfg-tax-message").value = c.tax_message || "BTW (21%)";
     el("#cfg-hide-empty-fields").checked = c.hide_empty_fields !== false;
     
-    // Bank tab
+    // Treasurer
+    el("#cfg-treasurer-name").value = (c.treasurer && c.treasurer.name) || "";
+    el("#cfg-treasurer-email").value = (c.treasurer && c.treasurer.email) || "";
+    el("#cfg-treasurer-title").value = (c.treasurer && c.treasurer.title) || "";
+    
+    // Bank
     el("#cfg-bank-bic").value = (c.bank && c.bank.bic) || "";
     el("#cfg-bank-btw").value = (c.bank && c.bank.btw_number) || "";
     el("#cfg-bank-account-name").value = (c.bank && c.bank.account_name) || "";
     el("#cfg-bank-iban").value = iban.iban || "";
     
-    // Dates tab
+    // Dates
     const dateSettings = c.date_settings || {};
     el("#cfg-show-date").checked = dateSettings.show_date !== false;
     el("#cfg-show-due-date").checked = dateSettings.show_due_date !== false;
     el("#cfg-date-format").value = dateSettings.date_format || "%d/%m/%Y";
     el("#cfg-due-date-format").value = dateSettings.due_date_format || "%d/%m/%Y";
     
-    // Columns tab
+    // Columns
     const columnSettings = c.column_settings || {};
     el("#cfg-col-show-date").checked = columnSettings.show_date !== false;
     el("#cfg-col-show-description").checked = columnSettings.show_description !== false;
@@ -1718,7 +2038,7 @@ function renderConfigModal() {
     el("#cfg-col-show-tax-amount").checked = columnSettings.show_tax_amount || false;
     el("#cfg-col-show-total").checked = columnSettings.show_total !== false;
     
-    // Summary tab
+    // Summary
     const summarySettings = c.summary_settings || {};
     el("#cfg-summary-show-net-price").checked = summarySettings.show_net_price !== false;
     el("#cfg-summary-show-tax").checked = summarySettings.show_tax !== false;
@@ -1730,12 +2050,12 @@ function saveConfigFromModal() {
     const c = STATE.config || {};
     
     // General
-    const bannerPath = el("#cfg-banner").value || null;
-    c.banner_path = bannerPath;
+    const bannerPath = el("#cfg-banner").value;
+    c.banner_path = bannerPath ? bannerPath.trim() : "";
     
     // Validate banner path
-    if (bannerPath && bannerPath.trim()) {
-        validateBannerPath(bannerPath);
+    if (c.banner_path) {
+        validateBannerPath(c.banner_path);
     }
     c.payment_request = el("#cfg-payment-request").value || null;
     c.tax_message = el("#cfg-tax-message").value || "BTW (21%)";
@@ -1790,7 +2110,65 @@ function saveConfigFromModal() {
     c.summary_settings.show_amount_due = el("#cfg-summary-show-amount-due").checked;
     
     saveConfigToStorage();
+    saveConfigToFile();
     toast("Configuration saved", "good");
+}
+
+async function saveConfigToFile() {
+    if (!STATE.projectDirectoryHandle) return;
+
+    try {
+        const configHandle = await STATE.projectDirectoryHandle.getDirectoryHandle('config');
+        const fileHandle = await configHandle.getFileHandle('config.yml', { create: true });
+        const writable = await fileHandle.createWritable();
+
+        const c = STATE.config;
+        let yaml = "";
+
+        // Helper to dump object to YAML
+        const dump = (obj, indent = 0) => {
+            let res = "";
+            const spaces = " ".repeat(indent);
+            for (const [key, value] of Object.entries(obj)) {
+                if (value === null || value === undefined) continue;
+                
+                if (typeof value === 'object' && !Array.isArray(value)) {
+                    res += `${spaces}${key}:\n${dump(value, indent + 2)}`;
+                } else if (typeof value === 'string') {
+                    if (value.includes('\n')) {
+                        res += `${spaces}${key}: |\n${value.split('\n').map(l => `${spaces}  ${l}`).join('\n')}\n`;
+                    } else {
+                        res += `${spaces}${key}: "${value.replace(/"/g, '\\"')}"\n`;
+                    }
+                } else {
+                    res += `${spaces}${key}: ${value}\n`;
+                }
+            }
+            return res;
+        };
+
+        // Construct config object matching structure
+        const configToSave = {
+            banner_path: c.banner_path,
+            treasurer: c.treasurer,
+            payment_request: c.payment_request,
+            tax_message: c.tax_message,
+            hide_empty_fields: c.hide_empty_fields,
+            bank: c.bank,
+            date_settings: c.date_settings,
+            column_settings: c.column_settings,
+            summary_settings: c.summary_settings
+        };
+
+        yaml = dump(configToSave);
+        
+        await writable.write(yaml);
+        await writable.close();
+        console.log("Saved config to config.yml");
+    } catch (e) {
+        console.error("Failed to save config to file:", e);
+        toast("Failed to save config to file", "warn");
+    }
 }
 
 function validateBannerPath(bannerPath) {
@@ -1824,7 +2202,7 @@ function validateBannerPath(bannerPath) {
     return true;
 }
 
-function updateBannerPreview(bannerPath) {
+async function updateBannerPreview(bannerPath) {
     const previewContainer = el("#banner-preview");
     if (!previewContainer) return;
     
@@ -1848,7 +2226,188 @@ function updateBannerPreview(bannerPath) {
         previewContainer.innerHTML = `<p class="hint muted small" style="color: var(--warn)">Banner not found: ${escapeHtml(bannerPath)}</p>`;
     };
     
-    img.src = bannerPath;
+    // Handle different path types
+    if (bannerPath.startsWith('data:') || bannerPath.startsWith('http')) {
+        img.src = bannerPath;
+    } else if (STATE.projectDirectoryHandle) {
+        // Try to load from project
+        try {
+            let filename = bannerPath;
+            if (filename.startsWith('./')) filename = filename.substring(2);
+            
+            let handle;
+            if (filename.startsWith('config/')) {
+                const configHandle = await STATE.projectDirectoryHandle.getDirectoryHandle('config');
+                handle = await configHandle.getFileHandle(filename.substring(7));
+            } else {
+                handle = await STATE.projectDirectoryHandle.getFileHandle(filename);
+            }
+            
+            const file = await handle.getFile();
+            const url = URL.createObjectURL(file);
+            img.src = url;
+            
+            // Clean up old blob if exists
+            if (previewContainer.dataset.blobUrl) {
+                URL.revokeObjectURL(previewContainer.dataset.blobUrl);
+            }
+            previewContainer.dataset.blobUrl = url;
+            
+        } catch (e) {
+            console.warn("Failed to load banner preview from disk:", e);
+            img.src = bannerPath; // Fallback to raw path (will likely fail but triggers onerror)
+        }
+    } else {
+        img.src = bannerPath;
+    }
+}
+
+// Edit Modal functions
+let currentEditingFileId = null;
+let currentEditingData = null;
+
+async function openEditModal(fileObj) {
+    currentEditingFileId = fileObj.id;
+    
+    try {
+        // If we have cached parsed data, use it. Otherwise parse the file.
+        if (!fileObj.parsedData) {
+            const html = await fileObj.file.text();
+            fileObj.parsedData = parseEasyInvoice(html);
+        }
+        
+        // Clone data to avoid direct mutation until save
+        currentEditingData = JSON.parse(JSON.stringify(fileObj.parsedData));
+        
+        // Populate fields
+        el("#edit-invoice-number").value = currentEditingData.invoice_number || "";
+        el("#edit-date").value = currentEditingData.date || "";
+        el("#edit-due-date").value = currentEditingData.due_date || "";
+        
+        el("#edit-client-name").value = currentEditingData.client_name_html || "";
+        el("#edit-client-address").value = currentEditingData.client_address_html || "";
+        
+        el("#edit-company-name").value = currentEditingData.company_name_html || "";
+        el("#edit-company-address").value = currentEditingData.company_address_html || "";
+        
+        // Summary
+        const summary = currentEditingData.summary || {};
+        el("#edit-summary-net").value = summary.net || "";
+        el("#edit-summary-tax").value = summary.tax || "";
+        el("#edit-summary-total").value = summary.total || "";
+        el("#edit-summary-due").value = summary.due || "";
+        
+        // Items
+        renderEditItemsTable();
+        
+        el("#edit-modal").classList.remove("hidden");
+    } catch (e) {
+        console.error("Failed to open edit modal:", e);
+        toast("Failed to parse file for editing", "bad");
+    }
+}
+
+function renderEditItemsTable() {
+    const tbody = el("#edit-items-table tbody");
+    tbody.innerHTML = "";
+    
+    if (!currentEditingData.items) currentEditingData.items = [];
+    
+    currentEditingData.items.forEach((item, index) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td><input type="text" class="edit-item-date" data-index="${index}" value="${escapeHtml(item.date || "")}" style="width: 100%"></td>
+            <td><input type="text" class="edit-item-desc" data-index="${index}" value="${escapeHtml(item.description || "")}" style="width: 100%"></td>
+            <td><input type="text" class="edit-item-qty" data-index="${index}" value="${escapeHtml(item.quantity || "")}" style="width: 60px"></td>
+            <td><input type="text" class="edit-item-price" data-index="${index}" value="${escapeHtml(item.unit_price || "")}" style="width: 80px"></td>
+            <td><input type="text" class="edit-item-total" data-index="${index}" value="${escapeHtml(item.total || "")}" style="width: 80px"></td>
+            <td style="text-align: center;">
+                <button class="btn ghost icon-only bad delete-item" data-index="${index}" title="Remove Item">
+                    <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+    
+    // Wire up delete buttons
+    els(".delete-item", tbody).forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            const index = parseInt(e.currentTarget.dataset.index);
+            currentEditingData.items.splice(index, 1);
+            renderEditItemsTable();
+        });
+    });
+    
+    // Wire up inputs to update state
+    els("input", tbody).forEach(input => {
+        input.addEventListener("change", (e) => {
+            const index = parseInt(e.target.dataset.index);
+            const fieldMap = {
+                "edit-item-date": "date",
+                "edit-item-desc": "description",
+                "edit-item-qty": "quantity",
+                "edit-item-price": "unit_price",
+                "edit-item-total": "total"
+            };
+            
+            for (const [cls, field] of Object.entries(fieldMap)) {
+                if (e.target.classList.contains(cls)) {
+                    currentEditingData.items[index][field] = e.target.value;
+                    break;
+                }
+            }
+        });
+    });
+}
+
+function saveEditModal() {
+    if (!currentEditingFileId || !currentEditingData) return;
+    
+    const fileObj = STATE.inputFiles.find(f => f.id === currentEditingFileId);
+    if (!fileObj) return;
+    
+    // Update data from main fields
+    currentEditingData.invoice_number = el("#edit-invoice-number").value;
+    currentEditingData.date = el("#edit-date").value;
+    currentEditingData.due_date = el("#edit-due-date").value;
+    
+    currentEditingData.client_name_html = el("#edit-client-name").value;
+    currentEditingData.client_address_html = el("#edit-client-address").value;
+    
+    currentEditingData.company_name_html = el("#edit-company-name").value;
+    currentEditingData.company_address_html = el("#edit-company-address").value;
+    
+    currentEditingData.summary = {
+        net: el("#edit-summary-net").value,
+        tax: el("#edit-summary-tax").value,
+        total: el("#edit-summary-total").value,
+        due: el("#edit-summary-due").value
+    };
+    
+    // Save back to file object
+    fileObj.parsedData = currentEditingData;
+    fileObj.isEdited = true; // Flag to indicate manual override
+    
+    el("#edit-modal").classList.add("hidden");
+    toast("Changes saved locally", "good");
+    
+    // Visual indicator in list?
+    renderInputs();
+}
+
+function resetEditModal() {
+    if (!currentEditingFileId) return;
+    
+    const fileObj = STATE.inputFiles.find(f => f.id === currentEditingFileId);
+    if (!fileObj) return;
+    
+    if (confirm("Discard all manual changes and re-parse the original file?")) {
+        delete fileObj.parsedData;
+        delete fileObj.isEdited;
+        openEditModal(fileObj); // Re-open to re-parse
+        toast("Reset to original data", "good");
+    }
 }
 
 // Event handlers
@@ -1867,6 +2426,32 @@ function wire() {
         });
     });
     
+    // Dark mode toggle
+    const themeToggle = el("#btn-theme-toggle");
+    if (themeToggle) {
+        // Init theme
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+            el("#icon-theme-moon").classList.add("hidden");
+            el("#icon-theme-sun").classList.remove("hidden");
+        }
+        
+        themeToggle.addEventListener("click", () => {
+            document.documentElement.classList.toggle('dark');
+            const isDark = document.documentElement.classList.contains('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            
+            if (isDark) {
+                el("#icon-theme-moon").classList.add("hidden");
+                el("#icon-theme-sun").classList.remove("hidden");
+            } else {
+                el("#icon-theme-moon").classList.remove("hidden");
+                el("#icon-theme-sun").classList.add("hidden");
+            }
+        });
+    }
+    
     // Project folder handlers
     el("#btn-select-project-folder").addEventListener("click", selectProjectFolderWithFileSystem);
     el("#btn-clear-folder").addEventListener("click", clearProjectFolder);
@@ -1878,28 +2463,39 @@ function wire() {
     });
     
     // Drag and drop
-    const dropZone = el("#drop-zone");
-    const inputsCard = el("#inputs-card");
+    // Drag and drop overlay
+    const dragOverlay = el("#drag-overlay");
+    let dragCounter = 0;
     
-    [dropZone, inputsCard].forEach(element => {
-        element.addEventListener('dragover', e => {
-            e.preventDefault();
-            element.style.borderColor = 'var(--accent)';
-            element.style.backgroundColor = 'rgba(28, 126, 214, 0.1)';
-        });
+    window.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dragCounter++;
+        dragOverlay.classList.add('active');
+    });
+    
+    window.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter === 0) {
+            dragOverlay.classList.remove('active');
+        }
+    });
+    
+    window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+    });
+    
+    window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        dragOverlay.classList.remove('active');
         
-        element.addEventListener('dragleave', e => {
-            e.preventDefault();
-            element.style.borderColor = 'var(--border)';
-            element.style.backgroundColor = 'transparent';
-        });
-        
-        element.addEventListener('drop', e => {
-            e.preventDefault();
-            element.style.borderColor = 'var(--border)';
-            element.style.backgroundColor = 'transparent';
+        if (e.dataTransfer && e.dataTransfer.files.length > 0) {
             addInputFiles(e.dataTransfer.files);
-        });
+            // Switch to inputs tab
+            const inputsTab = document.querySelector('.tab[data-tab="inputs"]');
+            if (inputsTab) inputsTab.click();
+        }
     });
     
     // Conversion buttons
@@ -1907,18 +2503,75 @@ function wire() {
     el("#btn-convert-all").addEventListener("click", () => convertFiles(false));
     
     // Clear selected
-    el("#btn-clear-selected").addEventListener("click", () => {
-        const selectedCount = STATE.selectedInputs.size;
-        if (selectedCount === 0) {
-            toast("No files selected", "warn");
+    // Clear selected inputs
+    el("#btn-clear-selected-inputs").addEventListener("click", async () => {
+        const inputCount = STATE.selectedInputs.size;
+        if (inputCount === 0) {
+            toast("No input files selected", "warn");
             return;
         }
         
-        if (confirm(`Delete ${selectedCount} selected file(s)?`)) {
+        if (confirm(`Delete ${inputCount} selected input file(s)?`)) {
+            const inputsToDelete = STATE.inputFiles.filter(f => STATE.selectedInputs.has(f.id));
+            
             STATE.inputFiles = STATE.inputFiles.filter(f => !STATE.selectedInputs.has(f.id));
             STATE.selectedInputs.clear();
+
+            // Remove from disk if project folder is open
+            if (STATE.projectDirectoryHandle) {
+                try {
+                    const inputHandle = await STATE.projectDirectoryHandle.getDirectoryHandle('input');
+                    for (const file of inputsToDelete) {
+                        try {
+                            await inputHandle.removeEntry(file.name);
+                            console.log(`Deleted input file from disk: ${file.name}`);
+                        } catch (e) {
+                            console.error(`Failed to delete ${file.name} from disk:`, e);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to access input directory for deletion:", e);
+                }
+            }
+            
             renderInputs();
-            toast(`Deleted ${selectedCount} file(s)`, "good");
+            updateFolderStatus();
+            toast(`Deleted ${inputCount} input file(s)`, "good");
+        }
+    });
+
+    // Clear selected outputs
+    el("#btn-clear-selected-outputs").addEventListener("click", async () => {
+        const outputCount = STATE.selectedOutputs.size;
+        if (outputCount === 0) {
+            toast("No output files selected", "warn");
+            return;
+        }
+        
+        if (confirm(`Delete ${outputCount} selected output file(s)?`)) {
+            const outputsToDelete = STATE.outputFiles.filter(f => STATE.selectedOutputs.has(f.id));
+            
+            // Remove from state
+            STATE.outputFiles = STATE.outputFiles.filter(f => !STATE.selectedOutputs.has(f.id));
+            
+            // Remove from disk if possible
+            if (STATE.outputDirectoryHandle) {
+                let deletedCount = 0;
+                for (const file of outputsToDelete) {
+                    try {
+                        await STATE.outputDirectoryHandle.removeEntry(file.name);
+                        deletedCount++;
+                    } catch (e) {
+                        console.error(`Failed to delete ${file.name} from disk:`, e);
+                    }
+                }
+                console.log(`Deleted ${deletedCount} files from disk`);
+            }
+            
+            STATE.selectedOutputs.clear();
+            renderOutputs();
+            updateFolderStatus();
+            toast(`Deleted ${outputCount} output file(s)`, "good");
         }
     });
     
@@ -1933,8 +2586,16 @@ function wire() {
         el("#config-modal").classList.add("hidden");
     });
     
-    el("#cfg-save").addEventListener("click", () => {
-        saveConfigFromModal();
+    el("#cfg-save").addEventListener("click", async () => {
+        const btn = el("#cfg-save");
+        const originalText = btn.textContent;
+        btn.textContent = "Saving...";
+        btn.disabled = true;
+        
+        await saveConfigFromModal();
+        
+        btn.textContent = originalText;
+        btn.disabled = false;
         el("#config-modal").classList.add("hidden");
     });
     
@@ -1953,6 +2614,38 @@ function wire() {
     el("#iban-input").addEventListener("keypress", (e) => {
         if (e.key === 'Enter') {
             saveIbanFromModal();
+        }
+    });
+
+    // Edit modal handlers
+    el("#edit-save").addEventListener("click", saveEditModal);
+    
+    el("#edit-cancel").addEventListener("click", () => {
+        el("#edit-modal").classList.add("hidden");
+    });
+    
+    el("#edit-reset").addEventListener("click", resetEditModal);
+    
+    el("#btn-add-item").addEventListener("click", () => {
+        if (!currentEditingData) return;
+        if (!currentEditingData.items) currentEditingData.items = [];
+        
+        // Add empty item
+        currentEditingData.items.push({
+            date: "",
+            description: "New Item",
+            quantity: "1",
+            unit_price: "0.00",
+            total: "0.00"
+        });
+        
+        renderEditItemsTable();
+    });
+    
+    // Close edit modal on backdrop click
+    el("#edit-modal").addEventListener("click", (e) => {
+        if (e.target === el("#edit-modal") || e.target.classList.contains("modal-backdrop")) {
+            el("#edit-modal").classList.add("hidden");
         }
     });
     
@@ -1988,6 +2681,118 @@ function wire() {
     el("#cfg-banner").addEventListener("input", (e) => {
         updateBannerPreview(e.target.value);
     });
+
+    // Preview modal
+    el("#preview-close").addEventListener("click", () => {
+        const modal = el("#preview-modal");
+        const frame = el("#preview-frame");
+        
+        modal.classList.add("hidden");
+        
+        // Clean up blob URL if it exists
+        if (frame.dataset.url) {
+            URL.revokeObjectURL(frame.dataset.url);
+            frame.dataset.url = '';
+        }
+        frame.src = 'about:blank';
+    });
+
+    el("#preview-modal").addEventListener("click", (e) => {
+        if (e.target === el("#preview-modal") || e.target.classList.contains("modal-backdrop")) {
+            el("#preview-close").click();
+        }
+    });
+
+    // Banner detection
+    el("#btn-detect-banners").addEventListener("click", async () => {
+        if (!STATE.projectDirectoryHandle) {
+            toast("Please open a project folder first", "warn");
+            return;
+        }
+        
+        const btn = el("#btn-detect-banners");
+        const originalText = btn.textContent;
+        btn.textContent = "Scanning...";
+        btn.disabled = true;
+        
+        try {
+            const images = [];
+            const extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+            
+            // Helper to scan directory
+            async function scanDir(dirHandle, pathPrefix) {
+                for await (const [name, handle] of dirHandle.entries()) {
+                    if (handle.kind === 'file') {
+                        const ext = name.substring(name.lastIndexOf('.')).toLowerCase();
+                        if (extensions.includes(ext)) {
+                            images.push({
+                                name: name,
+                                path: pathPrefix + name,
+                                handle: handle
+                            });
+                        }
+                    }
+                }
+            }
+            
+            // Scan config directory
+            try {
+                const configHandle = await STATE.projectDirectoryHandle.getDirectoryHandle('config');
+                await scanDir(configHandle, 'config/');
+            } catch (e) { console.log('No config dir found'); }
+            
+            // Scan root directory (limited)
+            await scanDir(STATE.projectDirectoryHandle, '');
+            
+            // Render results
+            const resultsContainer = el("#banner-detection-results");
+            const listContainer = el("#detected-banners-list");
+            listContainer.innerHTML = '';
+            
+            if (images.length === 0) {
+                toast("No images found in project root or config folder", "warn");
+                resultsContainer.classList.add("hidden");
+            } else {
+                resultsContainer.classList.remove("hidden");
+                
+                for (const img of images) {
+                    const div = document.createElement('div');
+                    div.className = 'detected-banner-item';
+                    div.style.cssText = 'min-width: 80px; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; padding: 4px; text-align: center;';
+                    div.title = `Click to select: ${img.path}`;
+                    
+                    // Load thumbnail
+                    const file = await img.handle.getFile();
+                    const url = URL.createObjectURL(file);
+                    
+                    div.innerHTML = `
+                        <div style="height: 40px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; overflow: hidden;">
+                            <img src="${url}" style="max-height: 100%; max-width: 100%; object-fit: contain;">
+                        </div>
+                        <div class="small muted" style="font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70px;">${img.name}</div>
+                    `;
+                    
+                    div.addEventListener('click', () => {
+                        el("#cfg-banner").value = img.path;
+                        updateBannerPreview(img.path);
+                        // Highlight selection
+                        els('.detected-banner-item', listContainer).forEach(d => d.style.borderColor = 'var(--border)');
+                        div.style.borderColor = 'var(--accent)';
+                    });
+                    
+                    listContainer.appendChild(div);
+                }
+                toast(`Found ${images.length} images`, "good");
+            }
+            
+        } catch (error) {
+            console.error("Banner detection failed:", error);
+            toast("Failed to scan for banners", "bad");
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    });
     
     // Options dropdown functionality
     const optionsButton = el("#options-button");
@@ -2013,9 +2818,84 @@ function wire() {
 }
 
 // Initialize
-function init() {
+async function init() {
     loadConfigFromStorage();
     wire();
+    
+    // Try to restore project handle
+    try {
+        const handle = await getStoredDirectoryHandle();
+        if (handle) {
+            // Check permissions
+            const perm = await handle.queryPermission({ mode: 'readwrite' });
+            if (perm === 'granted') {
+                console.log("Restoring project handle...");
+                STATE.projectDirectoryHandle = handle;
+                
+                // Re-acquire sub-handles
+                try {
+                    const inputHandle = await handle.getDirectoryHandle('input');
+                    const outputHandle = await handle.getDirectoryHandle('output');
+                    const configHandle = await handle.getDirectoryHandle('config');
+                    
+                    STATE.outputDirectoryHandle = outputHandle;
+                    await loadFilesFromDirectoryStructure(inputHandle, outputHandle, configHandle);
+                    updateFolderStatus();
+                    toast("Project restored", "good");
+                } catch (e) {
+                    console.error("Failed to restore sub-handles", e);
+                    // If structure is missing, maybe just clear it
+                    await clearStoredDirectoryHandle();
+                }
+            } else {
+                console.log("Permission needed for stored handle");
+                const btnOpen = el("#btn-select-project-folder");
+                btnOpen.textContent = `Reconnect ${handle.name}`;
+                btnOpen.classList.remove("hidden");
+                el("#btn-clear-folder").classList.add("hidden");
+                
+                // Override click handler to request permission instead of picking new
+                const originalHandler = btnOpen.onclick; // This might be null if added via addEventListener
+                
+                // We need to remove the existing listener to avoid double action,
+                // but since we used addEventListener, we can't easily remove anonymous functions.
+                // Instead, we'll clone the button to strip listeners
+                const newBtn = btnOpen.cloneNode(true);
+                btnOpen.parentNode.replaceChild(newBtn, btnOpen);
+                
+                newBtn.addEventListener("click", async () => {
+                    try {
+                        const newPerm = await handle.requestPermission({ mode: 'readwrite' });
+                        if (newPerm === 'granted') {
+                            STATE.projectDirectoryHandle = handle;
+                            const inputHandle = await handle.getDirectoryHandle('input');
+                            const outputHandle = await handle.getDirectoryHandle('output');
+                            const configHandle = await handle.getDirectoryHandle('config');
+                            
+                            STATE.outputDirectoryHandle = outputHandle;
+                            await loadFilesFromDirectoryStructure(inputHandle, outputHandle, configHandle);
+                            updateFolderStatus();
+                            
+                            // Restore original button behavior
+                            newBtn.textContent = "Open Project";
+                            const freshBtn = newBtn.cloneNode(true);
+                            newBtn.parentNode.replaceChild(freshBtn, newBtn);
+                            freshBtn.addEventListener("click", selectProjectFolderWithFileSystem);
+                        } else {
+                            // If denied, maybe user wants to pick a different folder
+                            selectProjectFolderWithFileSystem();
+                        }
+                    } catch (e) {
+                        console.error("Permission request failed", e);
+                        selectProjectFolderWithFileSystem();
+                    }
+                });
+            }
+        }
+    } catch (e) {
+        console.error("Failed to restore handle", e);
+    }
+
     renderInputs();
     renderOutputs();
 }

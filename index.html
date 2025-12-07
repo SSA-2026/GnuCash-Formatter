@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Invoice Formatter</title>
+  <link rel="icon" id="favicon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22currentColor%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><path d=%22M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z%22></path><polyline points=%2214 2 14 8 20 8%22></polyline><line x1=%2216%22 y1=%2213%22 x2=%228%22 y2=%2213%22></line><line x1=%2216%22 y1=%2217%22 x2=%228%22 y2=%2217%22></line><polyline points=%2210 9 9 9 8 9%22></polyline></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -17,8 +18,20 @@
       --warn: #f08c00;
       --bad: #e03131;
     }
+    html.light {
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --fg: #111;
+      --muted: #667085;
+      --accent: #1971c2;
+      --accent-2: #1c7ed6;
+      --border: #e5e7eb;
+      --good: #2b8a3e;
+      --warn: #e67700;
+      --bad: #c92a2a;
+    }
     @media (prefers-color-scheme: light) {
-      :root {
+      :root:not(.dark) {
         --bg: #f7f8fa;
         --panel: #ffffff;
         --fg: #111;
@@ -32,14 +45,11 @@
       }
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--fg); }
+    html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--fg); transition: background-color 0.3s, color 0.3s; }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
-    h1 { margin: 0 0 12px 0; font-size: 20px; }
+    h1 { margin: 0 0 4px 0; font-size: 20px; }
     .muted { color: var(--muted); }
     .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    @media (min-width: 980px) {
-      .grid-2 { grid-template-columns: 1fr 1fr; }
-    }
     .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
     .card h2 { margin: 0 0 10px 0; font-size: 16px; }
     .card .split-2 { margin-bottom: 10px; }
@@ -51,12 +61,17 @@
     }
     textarea { min-height: 80px; resize: vertical; }
     .btn {
-      display: inline-flex; align-items: center; gap: 8px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
       background: var(--accent); color: #fff; border: 1px solid transparent;
-      border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; font-size: 14px;
+      border-radius: 6px; padding: 0 16px; height: 36px; cursor: pointer; font-weight: 500; font-size: 14px;
+      transition: background-color 0.2s, border-color 0.2s;
     }
     .btn:hover { background: var(--accent-2); }
+    .btn svg { width: 18px; height: 18px; fill: currentColor; }
+    .btn.small { height: 32px; padding: 0 12px; }
+    .btn.icon-only { padding: 0; width: 32px; justify-content: center; }
     .btn.ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+    .btn.ghost:hover { background: rgba(128,128,128,0.1); }
     .btn.good { background: var(--good); }
     .btn.warn { background: var(--warn); }
     .btn.bad { background: var(--bad); }
@@ -67,7 +82,7 @@
     .list .head input[type="checkbox"] { margin: 0; }
     .list .rowi:nth-child(odd) { background: rgba(128,128,128,0.04); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .pill { font-size: 11px; color: var(--muted); }
+    .pill { font-size: 11px; color: var(--muted); background: rgba(128,128,128,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 8px; display: inline-block; }
     .right { text-align: right; }
     .actions { display: flex; gap: 6px; justify-content: flex-end; }
     .spacer { height: 8px; }
@@ -75,9 +90,8 @@
       position: fixed; left: 50%; transform: translateX(-50%);
       bottom: 18px; background: var(--panel); border: 1px solid var(--border);
       color: var(--fg); padding: 10px 14px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-      min-width: 240px; text-align: center; display: none;
+      min-width: 240px; text-align: center; display: none; z-index: 3000;
     }
-    .kbd { border: 1px solid var(--border); border-bottom-width: 2px; background: rgba(128,128,128,0.08); padding: 0 6px; border-radius: 6px; font-size: 12px; }
     .hint { font-size: 12px; color: var(--muted); }
     .split-2 { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
     a { color: var(--accent-2); text-decoration: none; }
@@ -87,173 +101,85 @@
     .small { font-size: 12px; }
     .hidden { display: none !important; }
     .progress-bar {
-      width: 100%;
-      height: 8px;
-      background-color: var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-      margin: 8px 0;
+      width: 100%; height: 8px; background-color: var(--border);
+      border-radius: 4px; overflow: hidden; margin: 8px 0;
     }
     .progress-fill {
-      height: 100%;
-      background-color: var(--accent);
-      width: 0%;
-      transition: width 0.3s ease;
+      height: 100%; background-color: var(--accent); width: 0%; transition: width 0.3s ease;
     }
-    .progress-text {
-      font-size: 12px;
-      color: var(--muted);
-      text-align: center;
-      margin: 4px 0;
-    }
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
+    .progress-text { font-size: 12px; color: var(--muted); text-align: center; margin: 4px 0; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
     .modal { position: fixed; inset: 0; display: grid; grid-template-rows: 1fr; z-index: 1000; }
     .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(1px); }
-    .modal-content { position: relative; margin: 5vh auto; max-width: 720px; width: calc(100% - 32px); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+    .modal-content { position: relative; margin: 5vh auto; max-width: 720px; width: calc(100% - 32px); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); max-height: 90vh; overflow-y: auto; }
     .modal-content .row { grid-template-columns: 1fr 2fr; }
-    .tabs {
-      display: flex;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 16px;
-      gap: 8px;
-    }
+    
+    /* Tabs */
+    .tabs { display: flex; gap: 2px; }
     .tab {
-      padding: 8px 16px;
-      cursor: pointer;
-      border: none;
-      background: transparent;
-      color: var(--muted);
-      font-size: 14px;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s ease;
+      padding: 8px 16px; cursor: pointer; border: none; background: transparent;
+      color: var(--muted); font-size: 14px; border-bottom: 2px solid transparent;
+      transition: all 0.2s ease; font-weight: 500;
     }
-    .tab:hover {
-      color: var(--fg);
-      background: rgba(128,128,128,0.08);
-    }
-    .tab.active {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
-      background: rgba(128,128,128,0.08);
-    }
-    .tab-content {
-      display: none;
-      max-height: 60vh;
-      overflow-y: auto;
-      padding-right: 8px;
-    }
-    .tab-content.active {
-      display: block;
-    }
-    .modal-content {
-      max-height: 80vh;
-      overflow-y: auto;
-    }
-    .tab-content::-webkit-scrollbar {
-      width: 6px;
-    }
-    .tab-content::-webkit-scrollbar-track {
-      background: var(--border);
-      border-radius: 3px;
-    }
-    .tab-content::-webkit-scrollbar-thumb {
-      background: var(--muted);
-      border-radius: 3px;
-    }
-    .tab-content::-webkit-scrollbar-thumb:hover {
-      background: var(--fg);
-    }
-    .dropdown {
-      position: relative;
-      display: inline-block;
-    }
+    .tab:hover { color: var(--fg); background: rgba(128,128,128,0.08); border-radius: 6px 6px 0 0; }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    
+    /* Dropdown */
+    .dropdown { position: relative; display: inline-block; }
     .dropdown-content {
-      display: none;
-      position: absolute;
-      background-color: var(--panel);
-      min-width: 200px;
-      box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-      z-index: 1000;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 8px;
-      right: 0;
+      display: none; position: absolute; background-color: var(--panel);
+      min-width: 200px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+      z-index: 1000; border: 1px solid var(--border); border-radius: 8px; padding: 8px; right: 0;
     }
-    .dropdown-content label {
-      display: block;
-      padding: 4px 8px;
-      cursor: pointer;
-      border-radius: 4px;
-      transition: background-color 0.2s;
+    .dropdown-content label { display: block; padding: 4px 8px; cursor: pointer; border-radius: 4px; transition: background-color 0.2s; }
+    .dropdown-content label:hover { background-color: rgba(128,128,128,0.1); }
+    .dropdown.show .dropdown-content { display: block; }
+    
+    /* Drag Overlay */
+    #drag-overlay {
+        position: fixed; inset: 0; background: rgba(28, 126, 214, 0.9); z-index: 2000;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        color: white; font-size: 24px; font-weight: bold;
+        backdrop-filter: blur(4px); opacity: 0; pointer-events: none; transition: opacity 0.2s;
     }
-    .dropdown-content label:hover {
-      background-color: rgba(128,128,128,0.1);
-    }
-    .dropdown.show .dropdown-content {
-      display: block;
-    }
-    .drop-zone {
-      border: 2px dashed var(--border);
-      border-radius: 8px;
-      padding: 20px;
-      text-align: center;
-      color: var(--muted);
-      transition: border-color 0.3s ease;
-    }
-    .drop-zone.dragover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    .config-section {
-      margin-bottom: 20px;
-      padding: 15px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
-    .config-section h3 {
-      margin: 0 0 10px 0;
-      font-size: 14px;
-      color: var(--accent);
-    }
+    #drag-overlay.active { opacity: 1; pointer-events: all; }
+    
+    /* Accordion Config */
+    details { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; overflow: hidden; background: rgba(128,128,128,0.02); }
+    summary { padding: 12px 16px; cursor: pointer; font-weight: 500; user-select: none; display: flex; align-items: center; justify-content: space-between; }
+    summary:hover { background: rgba(128,128,128,0.05); }
+    summary::after { content: '+'; font-size: 18px; font-weight: 300; }
+    details[open] summary { border-bottom: 1px solid var(--border); background: rgba(128,128,128,0.05); }
+    details[open] summary::after { content: '-'; }
+    .details-content { padding: 16px; background: var(--panel); }
+    
+    .config-section { margin-bottom: 20px; padding: 15px; border: 1px solid var(--border); border-radius: 8px; }
+    .config-section h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--accent); }
   </style>
 </head>
 <body>
+  <!-- Drag Overlay -->
+  <div id="drag-overlay">
+    <svg style="width: 64px; height: 64px; margin-bottom: 16px; fill: white;" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+    <div>Drop HTML files here to add them</div>
+  </div>
+
   <div class="wrap">
-    <h1>Invoice Formatter - Static Version</h1>
-    <p class="muted">Convert GnuCash Easy Invoice HTML exports to improved HTML. This version runs entirely in your browser.</p>
-    
-    <div class="config-section">
-      <h3>📁 Project Folder</h3>
-      <p class="hint">Select your project folder. The required structure (input/, output/, config/) will be created automatically.</p>
-      <div class="toolbar">
-        <button class="btn" id="btn-select-project-folder">📁 Select Project Folder</button>
-        <button class="btn ghost" id="btn-clear-folder">🗑️ Clear Folder</button>
-      </div>
-      <div id="folder-status" class="small muted" style="margin-top: 8px;">No folder selected</div>
-    </div>
-
-
-    <div class="split-2">
-      <div class="toolbar">
-        <button class="btn warn" id="btn-convert-all">⚡ Convert All</button>
-        <button class="btn good" id="btn-convert">✓ Convert Selected</button>
-        <div class="dropdown" id="options-dropdown">
-          <button class="btn ghost" id="options-button">⚙️ Options</button>
-          <div class="dropdown-content" id="dropdown-content">
-            <label class="checkbox"><input id="opt-overwrite" type="checkbox" checked /> 🔄 Overwrite existing files</label>
-            <label class="checkbox"><input id="opt-keep-html" type="checkbox" /> 📄 Keep improved HTML</label>
-            <label class="checkbox"><input id="opt-generate-pdf" type="checkbox" checked /> 📄 Generate PDF</label>
-            <label class="checkbox"><input id="opt-debug" type="checkbox" /> 🐛 Debug mode</label>
-          </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+            <h1>Invoice Formatter</h1>
+            <div id="folder-status" class="small muted">No folder selected</div>
         </div>
-      </div>
-      <div class="toolbar">
-        <button class="btn bad" id="btn-clear-selected">🗑️ Delete Selected</button>
-        <button class="btn" id="btn-edit-config">⚙️ Edit Config</button>
-      </div>
+        <div class="toolbar">
+            <button class="btn small" id="btn-select-project-folder">Open Project</button>
+            <button class="btn ghost small" id="btn-clear-folder">Close</button>
+            <button class="btn ghost icon-only" id="btn-theme-toggle" title="Toggle Dark Mode">
+                <svg viewBox="0 0 24 24" id="icon-theme-moon"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+                <svg viewBox="0 0 24 24" id="icon-theme-sun" class="hidden"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.79 1.41-1.41-1.79-1.79-1.41 1.41zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z"/></svg>
+            </button>
+        </div>
     </div>
 
     <div class="progress-container hidden" id="progress-container">
@@ -263,225 +189,374 @@
       <div class="progress-text" id="progress-text">Preparing...</div>
     </div>
 
-    <div class="spacer"></div>
-
-    <div class="grid grid-2">
-      <div class="card" id="inputs-card">
+    <!-- Unified Project Files Card -->
+    <div class="card">
         <div class="split-2">
-          <h2>Input Files</h2>
-          <div class="toolbar">
-            <label class="btn ghost">
-              📁 Add HTML Files
-              <input type="file" id="input-files" multiple accept=".html" style="display: none;">
-            </label>
-          </div>
+            <div class="tabs" style="margin-bottom: 0; border-bottom: none;">
+                <button class="tab active" data-tab="inputs">Input Files <span id="count-inputs" class="pill">0</span></button>
+                <button class="tab" data-tab="outputs">Output Files <span id="count-outputs" class="pill">0</span></button>
+            </div>
+            <div class="toolbar">
+                <button class="btn warn small" id="btn-convert-all">Convert All</button>
+                <button class="btn good small" id="btn-convert">Convert Selected</button>
+                <div class="dropdown" id="options-dropdown">
+                  <button class="btn ghost small" id="options-button">Options</button>
+                  <div class="dropdown-content" id="dropdown-content">
+                    <label class="checkbox"><input id="opt-overwrite" type="checkbox" checked /> Overwrite existing files</label>
+                    <label class="checkbox"><input id="opt-keep-html" type="checkbox" /> Keep improved HTML</label>
+                    <label class="checkbox"><input id="opt-debug" type="checkbox" /> Debug mode</label>
+                  </div>
+                </div>
+                <button class="btn small" id="btn-edit-config">Config</button>
+            </div>
         </div>
-        <div class="drop-zone" id="drop-zone">
-          <p>📄 Drag & drop HTML invoice files here</p>
-          <p class="small">or use the "Add HTML Files" button above</p>
-        </div>
-        <div class="list hidden" id="inputs-list">
-          <div class="head">
-            <div><input type="checkbox" id="select-all-inputs" title="Select All"></div>
-            <div class="sortable" data-sort="name">📄 File</div>
-            <div class="right">⚡ Actions</div>
-          </div>
-          <!-- items inserted -->
-        </div>
-      </div>
+        
+        <div style="border-top: 1px solid var(--border); margin: 10px -14px 0; padding-top: 0;"></div>
 
-      <div class="card">
-        <div class="split-2">
-          <h2>Output Files</h2>
-          <div class="toolbar">
-            <div class="small muted">Files are stored in the output list below</div>
-          </div>
+        <!-- Inputs Tab -->
+        <div id="tab-inputs" class="tab-content active" style="padding: 0;">
+             <div class="toolbar" style="padding: 10px 14px; background: rgba(128,128,128,0.02);">
+                <label class="btn ghost small icon-only" title="Add HTML Files">
+                  <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                  <input type="file" id="input-files" multiple accept=".html" style="display: none;">
+                </label>
+                <button class="btn bad small icon-only" id="btn-clear-selected-inputs" title="Delete Selected">
+                    <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                </button>
+             </div>
+             <div class="list" id="inputs-list" style="border: none; border-radius: 0; border-top: 1px solid var(--border);">
+                <div class="head">
+                    <div><input type="checkbox" id="select-all-inputs" title="Select All"></div>
+                    <div class="sortable" data-sort="name">File</div>
+                    <div class="right">Actions</div>
+                </div>
+                <!-- items inserted -->
+             </div>
+             <div id="drop-zone-inline" class="drop-zone hidden" style="margin: 20px; border-style: dashed;">
+                Drag files here
+             </div>
         </div>
-        <div class="list" id="outputs-list">
-          <div class="head">
-            <div><input type="checkbox" id="select-all-outputs" title="Select All"></div>
-            <div class="sortable" data-sort="name">📄 File</div>
-            <div class="right">⚡ Actions</div>
-          </div>
-          <!-- items inserted -->
+
+        <!-- Outputs Tab -->
+        <div id="tab-outputs" class="tab-content" style="padding: 0;">
+             <div class="toolbar" style="padding: 10px 14px; background: rgba(128,128,128,0.02);">
+                <button class="btn bad small icon-only" id="btn-clear-selected-outputs" title="Delete Selected">
+                    <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                </button>
+             </div>
+             <div class="list" id="outputs-list" style="border: none; border-radius: 0; border-top: 1px solid var(--border);">
+                <div class="head">
+                    <div><input type="checkbox" id="select-all-outputs" title="Select All"></div>
+                    <div class="sortable" data-sort="name">File</div>
+                    <div class="right">Actions</div>
+                </div>
+                <!-- items inserted -->
+             </div>
         </div>
-      </div>
     </div>
+
   </div>
 
   <div id="toast" class="toast"></div>
+
+  <!-- Preview Modal -->
+  <div id="preview-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width: 900px; height: 90vh; display: flex; flex-direction: column;">
+      <div class="split-2">
+        <h2>Preview</h2>
+        <button class="btn ghost icon-only" id="preview-close" title="Close">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div id="preview-container" style="flex: 1; background: #fff; border: 1px solid var(--border); overflow: hidden; border-radius: 4px;">
+        <iframe id="preview-frame" style="width: 100%; height: 100%; border: none;"></iframe>
+      </div>
+    </div>
+  </div>
   
   <!-- IBAN Configuration Modal -->
   <div id="iban-modal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <h2>⚠️ IBAN Configuration Required</h2>
+      <h2>IBAN Configuration Required</h2>
       <p>No IBAN is configured. Please enter your IBAN to continue.</p>
-      <div class="hint muted small" style="margin: 10px 0;">
-        <strong>Privacy Notice:</strong> This information is stored locally in your browser and is never sent to any server. All processing happens on your device.
-      </div>
       <div class="row">
-        <label>💳 IBAN</label>
+        <label>IBAN</label>
         <input id="iban-input" type="text" placeholder="NL.. .." />
       </div>
       <div class="toolbar" style="margin-top: 16px;">
-        <button class="btn" id="iban-save">💾 Save IBAN</button>
-        <button class="btn ghost" id="iban-cancel">✖️ Cancel</button>
+        <button class="btn small" id="iban-save">Save</button>
+        <button class="btn ghost small" id="iban-cancel">Cancel</button>
       </div>
     </div>
   </div>
   
+  <!-- Config Modal -->
   <div id="config-modal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h2>Edit configuration</h2>
       
-      <div class="tabs">
-        <button class="tab active" data-tab="general">📋 General</button>
-        <button class="tab" data-tab="bank">🏦 Bank</button>
-        <button class="tab" data-tab="dates">📅 Dates</button>
-        <button class="tab" data-tab="columns">📊 Columns</button>
-        <button class="tab" data-tab="summary">📋 Summary</button>
-      </div>
-      
-      <div class="modal-body">
-        <!-- General Tab -->
-        <div id="tab-general" class="tab-content active">
+      <details open>
+        <summary>General</summary>
+        <div class="details-content">
           <div class="row">
-            <label>🖼️ Banner path</label>
-            <input id="cfg-banner" type="text" placeholder="../media/banner.png" />
+            <label>Banner path</label>
+            <div style="display: flex; gap: 8px; width: 100%;">
+              <input id="cfg-banner" type="text" placeholder="../media/banner.png" style="flex: 1;" />
+              <button class="btn ghost small" id="btn-detect-banners" title="Detect banners in project">Detect</button>
+            </div>
           </div>
+          
+          <!-- Banner detection results -->
+          <div id="banner-detection-results" class="hidden" style="margin-bottom: 10px; padding: 10px; background: rgba(128,128,128,0.05); border-radius: 8px;">
+            <div class="small muted" style="margin-bottom: 8px;">Detected images:</div>
+            <div id="detected-banners-list" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;"></div>
+          </div>
+
           <div class="row">
-            <label>📋 Banner preview</label>
+            <label>Banner preview</label>
             <div id="banner-preview" style="border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center;">
               <p class="hint muted small">No banner configured</p>
             </div>
           </div>
-          <div class="hint muted small">Supported formats: Relative paths (../config/banner.png), absolute URLs (https://...), or data URLs (data:image/...)</div>
           <div class="row">
-            <label>👤 Treasurer name</label>
-            <input id="cfg-treasurer-name" type="text" placeholder="Name" />
-          </div>
-          <div class="row">
-            <label>📧 Treasurer email</label>
-            <input id="cfg-treasurer-email" type="email" placeholder="email@example.com" />
-          </div>
-          <div class="row">
-            <label>🎭 Treasurer title</label>
-            <input id="cfg-treasurer-title" type="text" placeholder="Treasurer" />
-          </div>
-          <div class="row">
-            <label>💳 Payment request</label>
+            <label>Payment request</label>
             <textarea id="cfg-payment-request" placeholder="Payment request text (supports newlines)"></textarea>
           </div>
           <div class="row">
-            <label>🧾 Tax message</label>
+            <label>Tax message</label>
             <input id="cfg-tax-message" type="text" placeholder="BTW (21%)" value="BTW (21%)" />
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-hide-empty-fields" type="checkbox" /> 🔍 Hide empty fields in invoice tables</label>
+            <label class="checkbox"><input id="cfg-hide-empty-fields" type="checkbox" /> Hide empty fields in invoice tables</label>
           </div>
-          <div class="hint muted small">When enabled, empty cells in the invoice table will be completely hidden instead of showing blank cells.</div>
         </div>
-        
-        <!-- Bank Tab -->
-        <div id="tab-bank" class="tab-content">
+      </details>
+
+      <details>
+        <summary>Treasurer</summary>
+        <div class="details-content">
           <div class="row">
-            <label>🏦 Bank BIC</label>
+            <label>Treasurer name</label>
+            <input id="cfg-treasurer-name" type="text" placeholder="Name" />
+          </div>
+          <div class="row">
+            <label>Treasurer email</label>
+            <input id="cfg-treasurer-email" type="email" placeholder="email@example.com" />
+          </div>
+          <div class="row">
+            <label>Treasurer title</label>
+            <input id="cfg-treasurer-title" type="text" placeholder="Treasurer" />
+          </div>
+        </div>
+      </details>
+      
+      <details>
+        <summary>Bank</summary>
+        <div class="details-content">
+          <div class="row">
+            <label>Bank BIC</label>
             <input id="cfg-bank-bic" type="text" placeholder="INGBNL2A" />
           </div>
           <div class="row">
-            <label>🧾 BTW number</label>
+            <label>BTW number</label>
             <input id="cfg-bank-btw" type="text" placeholder="NL..." />
           </div>
           <div class="row">
-            <label>👤 Account name</label>
+            <label>Account name</label>
             <input id="cfg-bank-account-name" type="text" placeholder="Account holder" />
           </div>
           <div class="row">
-            <label>💳 IBAN</label>
+            <label>IBAN</label>
             <input id="cfg-bank-iban" type="text" placeholder="NL.. .." />
           </div>
         </div>
-        
-        <!-- Dates Tab -->
-        <div id="tab-dates" class="tab-content">
+      </details>
+      
+      <details>
+        <summary>Dates</summary>
+        <div class="details-content">
           <div class="row">
-            <label class="checkbox"><input id="cfg-show-date" type="checkbox" /> 📅 Show Date</label>
+            <label class="checkbox"><input id="cfg-show-date" type="checkbox" /> Show Date</label>
           </div>
           <div class="row">
-            <label>📅 Date Format</label>
+            <label>Date Format</label>
             <input id="cfg-date-format" type="text" placeholder="%Y-%m-%d" />
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-show-due-date" type="checkbox" /> ⏰ Show Due Date</label>
+            <label class="checkbox"><input id="cfg-show-due-date" type="checkbox" /> Show Due Date</label>
           </div>
           <div class="row">
-            <label>⏰ Due Date Format</label>
+            <label>Due Date Format</label>
             <input id="cfg-due-date-format" type="text" placeholder="%Y-%m-%d" />
           </div>
         </div>
-        
-        <!-- Columns Tab -->
-        <div id="tab-columns" class="tab-content">
+      </details>
+      
+      <details>
+        <summary>Columns</summary>
+        <div class="details-content">
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-date" type="checkbox" /> 📅 Show Date Column</label>
+            <label class="checkbox"><input id="cfg-col-show-date" type="checkbox" /> Show Date Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-description" type="checkbox" /> 📝 Show Description Column</label>
+            <label class="checkbox"><input id="cfg-col-show-description" type="checkbox" /> Show Description Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-action" type="checkbox" /> ⚡ Show Action Column</label>
+            <label class="checkbox"><input id="cfg-col-show-action" type="checkbox" /> Show Action Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-quantity" type="checkbox" /> 🔢 Show Quantity Column</label>
+            <label class="checkbox"><input id="cfg-col-show-quantity" type="checkbox" /> Show Quantity Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-price" type="checkbox" /> 💰 Show Price Column</label>
+            <label class="checkbox"><input id="cfg-col-show-price" type="checkbox" /> Show Price Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-discount" type="checkbox" /> 🏷️ Show Discount Column</label>
+            <label class="checkbox"><input id="cfg-col-show-discount" type="checkbox" /> Show Discount Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-taxable" type="checkbox" /> 🧾 Show Taxable Column</label>
+            <label class="checkbox"><input id="cfg-col-show-taxable" type="checkbox" /> Show Taxable Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-tax-amount" type="checkbox" /> 💸 Show Tax Amount Column</label>
+            <label class="checkbox"><input id="cfg-col-show-tax-amount" type="checkbox" /> Show Tax Amount Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-total" type="checkbox" /> 📊 Show Total Column</label>
+            <label class="checkbox"><input id="cfg-col-show-total" type="checkbox" /> Show Total Column</label>
           </div>
         </div>
-        
-        <!-- Summary Tab -->
-        <div id="tab-summary" class="tab-content">
+      </details>
+      
+      <details>
+        <summary>Summary</summary>
+        <div class="details-content">
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-net-price" type="checkbox" /> 📊 Show Net Price Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-net-price" type="checkbox" /> Show Net Price Row</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-tax" type="checkbox" /> 🧾 Show Tax Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-tax" type="checkbox" /> Show Tax Row</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-total-price" type="checkbox" /> 💰 Show Total Price Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-total-price" type="checkbox" /> Show Total Price Row</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-amount-due" type="checkbox" /> 💳 Show Amount Due Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-amount-due" type="checkbox" /> Show Amount Due Row</label>
           </div>
-          <div class="hint muted small">Control which summary rows appear at the bottom of the invoice table.</div>
         </div>
-        
-      </div>
+      </details>
       
       <div class="toolbar">
-        <button class="btn" id="cfg-save">💾 Save</button>
-        <button class="btn ghost" id="cfg-cancel">✖️ Cancel</button>
+        <button class="btn small" id="cfg-save">Save</button>
+        <button class="btn ghost small" id="cfg-cancel">Cancel</button>
       </div>
-      <div class="hint muted small">Configuration is stored in your browser's local storage.</div>
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <!-- Edit Input Modal -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width: 900px;">
+      <h2>Edit Invoice Data</h2>
+      
+      <div class="config-section">
+        <div class="row">
+            <label>Invoice Number</label>
+            <input id="edit-invoice-number" type="text" />
+        </div>
+        <div class="row">
+            <label>Date</label>
+            <input id="edit-date" type="text" />
+        </div>
+        <div class="row">
+            <label>Due Date</label>
+            <input id="edit-due-date" type="text" />
+        </div>
+      </div>
+
+      <div class="split-2">
+        <div class="config-section" style="flex: 1;">
+            <h3>Client</h3>
+            <div class="row" style="grid-template-columns: 1fr;">
+                <label>Name (HTML)</label>
+                <textarea id="edit-client-name" style="min-height: 40px;"></textarea>
+            </div>
+            <div class="row" style="grid-template-columns: 1fr;">
+                <label>Address (HTML)</label>
+                <textarea id="edit-client-address"></textarea>
+            </div>
+        </div>
+        <div class="config-section" style="flex: 1;">
+            <h3>Company</h3>
+            <div class="row" style="grid-template-columns: 1fr;">
+                <label>Name (HTML)</label>
+                <textarea id="edit-company-name" style="min-height: 40px;"></textarea>
+            </div>
+            <div class="row" style="grid-template-columns: 1fr;">
+                <label>Address (HTML)</label>
+                <textarea id="edit-company-address"></textarea>
+            </div>
+        </div>
+      </div>
+
+      <details open>
+        <summary>Items</summary>
+        <div class="details-content" style="padding: 0;">
+            <div style="overflow-x: auto;">
+                <table id="edit-items-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <thead style="background: rgba(128,128,128,0.05); text-align: left;">
+                        <tr>
+                            <th style="padding: 8px;">Date</th>
+                            <th style="padding: 8px;">Description</th>
+                            <th style="padding: 8px;">Qty</th>
+                            <th style="padding: 8px;">Price</th>
+                            <th style="padding: 8px;">Total</th>
+                            <th style="padding: 8px; width: 40px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Items go here -->
+                    </tbody>
+                </table>
+            </div>
+            <div style="padding: 10px;">
+                <button class="btn ghost small" id="btn-add-item">+ Add Item</button>
+            </div>
+        </div>
+      </details>
+
+      <details>
+        <summary>Summary</summary>
+        <div class="details-content">
+            <div class="row">
+                <label>Net Price</label>
+                <input id="edit-summary-net" type="text" />
+            </div>
+            <div class="row">
+                <label>Tax</label>
+                <input id="edit-summary-tax" type="text" />
+            </div>
+            <div class="row">
+                <label>Total Price</label>
+                <input id="edit-summary-total" type="text" />
+            </div>
+            <div class="row">
+                <label>Amount Due</label>
+                <input id="edit-summary-due" type="text" />
+            </div>
+        </div>
+      </details>
+
+      <div class="toolbar">
+        <button class="btn small" id="edit-save">Save</button>
+        <button class="btn ghost small" id="edit-cancel">Cancel</button>
+        <button class="btn ghost bad small" id="edit-reset" style="margin-left: auto;">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="jspdf.umd.min.js"></script>
+  <script src="html2canvas.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
