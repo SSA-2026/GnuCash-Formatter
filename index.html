@@ -47,6 +47,7 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--fg); transition: background-color 0.3s, color 0.3s; }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .header-container { margin-left: -20px; margin-right: -20px; padding-left: 20px; padding-right: 20px; }
     h1 { margin: 0 0 4px 0; font-size: 20px; }
     .muted { color: var(--muted); }
     .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
@@ -159,7 +160,7 @@
     .config-section h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--accent); }
   </style>
 </head>
-<body>
+<body x-data="app()">
   <!-- Drag Overlay -->
   <div id="drag-overlay">
     <svg style="width: 64px; height: 64px; margin-bottom: 16px; fill: white;" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
@@ -167,54 +168,54 @@
   </div>
 
   <div class="wrap">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <div>
             <h1>Invoice Formatter</h1>
-            <div id="folder-status" class="small muted">No folder selected</div>
+            <div id="folder-status" class="small muted" x-text="statusText" :style="{ color: statusColor }">No folder selected</div>
         </div>
         <div class="toolbar">
-            <button class="btn small" id="btn-select-project-folder">Open Project</button>
-            <button class="btn ghost small" id="btn-clear-folder">Close</button>
-            <button class="btn ghost icon-only" id="btn-theme-toggle" title="Toggle Dark Mode">
-                <svg viewBox="0 0 24 24" id="icon-theme-moon"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
-                <svg viewBox="0 0 24 24" id="icon-theme-sun" class="hidden"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.79 1.41-1.41-1.79-1.79-1.41 1.41zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z"/></svg>
+            <button class="btn small" id="btn-select-project-folder" x-show="!hasFolder">Open Project</button>
+            <button class="btn ghost small" id="btn-clear-folder" x-show="hasFolder">Close</button>
+            <button class="btn ghost icon-only" id="btn-theme-toggle" title="Toggle Dark Mode" @click="toggleTheme()">
+                <svg viewBox="0 0 24 24" id="icon-theme-moon" x-show="theme === 'light'"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+                <svg viewBox="0 0 24 24" id="icon-theme-sun" x-show="theme === 'dark'" style="display: none;"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.79 1.41-1.41-1.79-1.79-1.41 1.41zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z"/></svg>
             </button>
         </div>
     </div>
 
-    <div class="progress-container hidden" id="progress-container">
+    <div class="progress-container" id="progress-container" x-show="showProgress" style="display: none;">
       <div class="progress-bar">
-        <div class="progress-fill" id="progress-fill"></div>
+        <div class="progress-fill" id="progress-fill" :style="{ width: progress + '%' }"></div>
       </div>
-      <div class="progress-text" id="progress-text">Preparing...</div>
+      <div class="progress-text" id="progress-text" x-text="progressText">Preparing...</div>
     </div>
 
     <!-- Unified Project Files Card -->
     <div class="card">
         <div class="split-2">
             <div class="tabs" style="margin-bottom: 0; border-bottom: none;">
-                <button class="tab active" data-tab="inputs">Input Files <span id="count-inputs" class="pill">0</span></button>
-                <button class="tab" data-tab="outputs">Output Files <span id="count-outputs" class="pill">0</span></button>
+                <button class="tab" :class="{ 'active': activeTab === 'inputs' }" @click="activeTab = 'inputs'">Input Files <span id="count-inputs" class="pill" x-text="inputCount">0</span></button>
+                <button class="tab" :class="{ 'active': activeTab === 'outputs' }" @click="activeTab = 'outputs'">Output Files <span id="count-outputs" class="pill" x-text="outputCount">0</span></button>
             </div>
             <div class="toolbar">
                 <button class="btn warn small" id="btn-convert-all">Convert All</button>
                 <button class="btn good small" id="btn-convert">Convert Selected</button>
-                <div class="dropdown" id="options-dropdown">
-                  <button class="btn ghost small" id="options-button">Options</button>
-                  <div class="dropdown-content" id="dropdown-content">
-                    <label class="checkbox"><input id="opt-overwrite" type="checkbox" checked /> Overwrite existing files</label>
-                    <label class="checkbox"><input id="opt-keep-html" type="checkbox" /> Keep improved HTML</label>
-                    <label class="checkbox"><input id="opt-debug" type="checkbox" /> Debug mode</label>
+                <div class="dropdown" :class="{ 'show': showOptions }" @click.outside="showOptions = false">
+                  <button class="btn ghost small" @click="showOptions = !showOptions">Options</button>
+                  <div class="dropdown-content">
+                    <label class="checkbox"><input type="checkbox" x-model="conversionOptions.overwrite" /> Overwrite existing files</label>
+                    <label class="checkbox"><input type="checkbox" x-model="conversionOptions.keepHtml" /> Keep improved HTML</label>
+                    <label class="checkbox"><input type="checkbox" x-model="conversionOptions.debug" /> Debug mode</label>
                   </div>
                 </div>
-                <button class="btn small" id="btn-edit-config">Config</button>
+                <button class="btn small" @click="openConfig()">Config</button>
             </div>
         </div>
         
         <div style="border-top: 1px solid var(--border); margin: 10px -14px 0; padding-top: 0;"></div>
 
         <!-- Inputs Tab -->
-        <div id="tab-inputs" class="tab-content active" style="padding: 0;">
+        <div id="tab-inputs" class="tab-content" :class="{ 'active': activeTab === 'inputs' }" style="padding: 0;">
              <div class="toolbar" style="padding: 10px 14px; background: rgba(128,128,128,0.02);">
                 <label class="btn ghost small icon-only" title="Add HTML Files">
                   <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
@@ -224,33 +225,68 @@
                     <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                 </button>
              </div>
-             <div class="list" id="inputs-list" style="border: none; border-radius: 0; border-top: 1px solid var(--border);">
+             
+             <div class="list" id="inputs-list" style="border: none; border-radius: 0; border-top: 1px solid var(--border);" x-show="inputFiles.length > 0">
                 <div class="head">
-                    <div><input type="checkbox" id="select-all-inputs" title="Select All"></div>
+                    <div><input type="checkbox" id="select-all-inputs" title="Select All" @click="toggleAllInputs()" :checked="selectedInputs.size === inputFiles.length && inputFiles.length > 0" :indeterminate="selectedInputs.size > 0 && selectedInputs.size < inputFiles.length"></div>
                     <div class="sortable" data-sort="name">File</div>
                     <div class="right">Actions</div>
                 </div>
-                <!-- items inserted -->
+                
+                <template x-for="file in inputFiles" :key="file.id">
+                    <div class="rowi">
+                        <div><input type="checkbox" class="pick" :checked="selectedInputs.has(file.id)" @change="toggleInput(file.id)" /></div>
+                        <div class="mono" :title="file.name"><span x-text="file.name"></span><div class="pill" x-text="formatBytes(file.size)"></div></div>
+                        <div class="actions">
+                            <button class="btn ghost icon-only preview" @click="window._uiCallbacks.onPreviewInput(file)" title="Preview">
+                                <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                            </button>
+                            <button class="btn ghost icon-only edit" @click="window._uiCallbacks.onEditInput(file)" title="Edit Data">
+                                <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </template>
              </div>
-             <div id="drop-zone-inline" class="drop-zone hidden" style="margin: 20px; border-style: dashed;">
+             
+             <div id="drop-zone-inline" class="drop-zone" style="margin: 20px; border-style: dashed;" x-show="inputFiles.length === 0">
                 Drag files here
              </div>
         </div>
 
         <!-- Outputs Tab -->
-        <div id="tab-outputs" class="tab-content" style="padding: 0;">
+        <div id="tab-outputs" class="tab-content" :class="{ 'active': activeTab === 'outputs' }" style="padding: 0;">
              <div class="toolbar" style="padding: 10px 14px; background: rgba(128,128,128,0.02);">
                 <button class="btn bad small icon-only" id="btn-clear-selected-outputs" title="Delete Selected">
                     <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                 </button>
              </div>
-             <div class="list" id="outputs-list" style="border: none; border-radius: 0; border-top: 1px solid var(--border);">
+             
+             <div class="list" id="outputs-list" style="border: none; border-radius: 0; border-top: 1px solid var(--border);" x-show="outputFiles.length > 0">
                 <div class="head">
-                    <div><input type="checkbox" id="select-all-outputs" title="Select All"></div>
+                    <div><input type="checkbox" id="select-all-outputs" title="Select All" @click="toggleAllOutputs()" :checked="selectedOutputs.size === outputFiles.length && outputFiles.length > 0" :indeterminate="selectedOutputs.size > 0 && selectedOutputs.size < outputFiles.length"></div>
                     <div class="sortable" data-sort="name">File</div>
                     <div class="right">Actions</div>
                 </div>
-                <!-- items inserted -->
+                
+                <template x-for="file in outputFiles" :key="file.id">
+                    <div class="rowi">
+                        <div><input type="checkbox" class="pick" :checked="selectedOutputs.has(file.id)" @change="toggleOutput(file.id)" /></div>
+                        <div class="mono" :title="file.name"><span x-text="file.name"></span><div class="pill" x-text="formatBytes(file.size)"></div></div>
+                        <div class="actions">
+                            <button class="btn ghost icon-only preview" @click="window._uiCallbacks.onPreviewOutput(file)" title="Preview">
+                                <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                            </button>
+                            <button class="btn ghost icon-only print" @click="window._uiCallbacks.onPrintOutput(file)" title="Print">
+                                <svg viewBox="0 0 24 24"><path d="M19 8h-1V3H6v5H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zM8 5h8v3H8V5zm8 12v2H8v-4h8v2zm2-2v-2H6v2H4v-4c0-.55.45-1 1-1h14c.55 0 1 .45 1 1v4h-2z"/><circle cx="18" cy="11.5" r="1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+             </div>
+             
+             <div class="rowi" style="justify-content: center; color: var(--muted); padding: 20px; display: flex;" x-show="outputFiles.length === 0">
+                No output files yet
              </div>
         </div>
     </div>
@@ -260,12 +296,12 @@
   <div id="toast" class="toast"></div>
 
   <!-- Preview Modal -->
-  <div id="preview-modal" class="modal hidden">
-    <div class="modal-backdrop"></div>
+  <div id="preview-modal" class="modal" x-show="showPreviewModal" style="display: none;">
+    <div class="modal-backdrop" @click="closePreview()"></div>
     <div class="modal-content" style="max-width: 900px; height: 90vh; display: flex; flex-direction: column;">
       <div class="split-2">
-        <h2>Preview</h2>
-        <button class="btn ghost icon-only" id="preview-close" title="Close">
+        <h2 x-text="previewTitle">Preview</h2>
+        <button class="btn ghost icon-only" id="preview-close" title="Close" @click="closePreview()">
             <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>
@@ -276,61 +312,70 @@
   </div>
   
   <!-- IBAN Configuration Modal -->
-  <div id="iban-modal" class="modal hidden">
-    <div class="modal-backdrop"></div>
+  <div id="iban-modal" class="modal" x-show="showIbanModal" style="display: none;">
+    <div class="modal-backdrop" @click="closeIban()"></div>
     <div class="modal-content">
       <h2>IBAN Configuration Required</h2>
       <p>No IBAN is configured. Please enter your IBAN to continue.</p>
       <div class="row">
         <label>IBAN</label>
-        <input id="iban-input" type="text" placeholder="NL.. .." />
+        <input id="iban-input" type="text" placeholder="NL.. .." x-model="ibanInput" @keydown.enter="saveIban()" />
       </div>
       <div class="toolbar" style="margin-top: 16px;">
-        <button class="btn small" id="iban-save">Save</button>
-        <button class="btn ghost small" id="iban-cancel">Cancel</button>
+        <button class="btn small" id="iban-save" @click="saveIban()">Save</button>
+        <button class="btn ghost small" id="iban-cancel" @click="closeIban()">Cancel</button>
       </div>
     </div>
   </div>
   
   <!-- Config Modal -->
-  <div id="config-modal" class="modal hidden">
-    <div class="modal-backdrop"></div>
+  <div id="config-modal" class="modal" :class="{ 'hidden': !showConfigModal }" style="display: none;" x-show="showConfigModal">
+    <div class="modal-backdrop" @click="closeConfig()"></div>
     <div class="modal-content">
       <h2>Edit configuration</h2>
       
+      <template x-if="config.banner_path !== undefined">
+      <div>
       <details open>
         <summary>General</summary>
         <div class="details-content">
           <div class="row">
             <label>Banner path</label>
             <div style="display: flex; gap: 8px; width: 100%;">
-              <input id="cfg-banner" type="text" placeholder="../media/banner.png" style="flex: 1;" />
-              <button class="btn ghost small" id="btn-detect-banners" title="Detect banners in project">Detect</button>
+              <input id="cfg-banner" type="text" placeholder="../media/banner.png" style="flex: 1;" x-model="config.banner_path" />
+              <button class="btn ghost small" id="btn-detect-banners" title="Detect banners in project" @click="window.detectBanners()">Detect</button>
             </div>
           </div>
           
           <!-- Banner detection results -->
-          <div id="banner-detection-results" class="hidden" style="margin-bottom: 10px; padding: 10px; background: rgba(128,128,128,0.05); border-radius: 8px;">
+          <div id="banner-detection-results" x-show="detectedBanners.length > 0" style="margin-bottom: 10px; padding: 10px; background: rgba(128,128,128,0.05); border-radius: 8px; display: none;">
             <div class="small muted" style="margin-bottom: 8px;">Detected images:</div>
-            <div id="detected-banners-list" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;"></div>
+            <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;">
+                <template x-for="banner in detectedBanners" :key="banner.path">
+                    <div class="detected-banner-item"
+                         style="min-width: 80px; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; padding: 4px; text-align: center;"
+                         :style="{ borderColor: config.banner_path === banner.path ? 'var(--accent)' : 'var(--border)' }"
+                         @click="config.banner_path = banner.path"
+                         :title="'Click to select: ' + banner.path">
+                        <div style="height: 40px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; overflow: hidden;">
+                            <img :src="banner.url" style="max-height: 100%; max-width: 100%; object-fit: contain;">
+                        </div>
+                        <div class="small muted" style="font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70px;" x-text="banner.name"></div>
+                    </div>
+                </template>
+            </div>
           </div>
 
           <div class="row">
-            <label>Banner preview</label>
-            <div id="banner-preview" style="border: 1px solid var(--border); border-radius: 4px; padding: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center;">
-              <p class="hint muted small">No banner configured</p>
-            </div>
-          </div>
-          <div class="row">
             <label>Payment request</label>
-            <textarea id="cfg-payment-request" placeholder="Payment request text (supports newlines)"></textarea>
+            <textarea id="cfg-payment-request" placeholder="Payment request text (supports newlines)" x-model="config.payment_request"></textarea>
           </div>
           <div class="row">
             <label>Tax message</label>
-            <input id="cfg-tax-message" type="text" placeholder="BTW (21%)" value="BTW (21%)" />
+            <input id="cfg-tax-message" type="text" placeholder="BTW (21%)" x-model="config.tax_message" />
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-hide-empty-fields" type="checkbox" /> Hide empty fields in invoice tables</label>
+            <label class="checkbox"><input id="cfg-hide-empty-fields" type="checkbox" x-model="config.hide_empty_fields" /> Hide empty fields in invoice tables</label>
           </div>
         </div>
       </details>
@@ -340,15 +385,15 @@
         <div class="details-content">
           <div class="row">
             <label>Treasurer name</label>
-            <input id="cfg-treasurer-name" type="text" placeholder="Name" />
+            <input id="cfg-treasurer-name" type="text" placeholder="Name" x-model="config.treasurer.name" />
           </div>
           <div class="row">
             <label>Treasurer email</label>
-            <input id="cfg-treasurer-email" type="email" placeholder="email@example.com" />
+            <input id="cfg-treasurer-email" type="email" placeholder="email@example.com" x-model="config.treasurer.email" />
           </div>
           <div class="row">
             <label>Treasurer title</label>
-            <input id="cfg-treasurer-title" type="text" placeholder="Treasurer" />
+            <input id="cfg-treasurer-title" type="text" placeholder="Treasurer" x-model="config.treasurer.title" />
           </div>
         </div>
       </details>
@@ -358,19 +403,19 @@
         <div class="details-content">
           <div class="row">
             <label>Bank BIC</label>
-            <input id="cfg-bank-bic" type="text" placeholder="INGBNL2A" />
+            <input id="cfg-bank-bic" type="text" placeholder="INGBNL2A" x-model="config.bank.bic" />
           </div>
           <div class="row">
             <label>BTW number</label>
-            <input id="cfg-bank-btw" type="text" placeholder="NL..." />
+            <input id="cfg-bank-btw" type="text" placeholder="NL..." x-model="config.bank.btw_number" />
           </div>
           <div class="row">
             <label>Account name</label>
-            <input id="cfg-bank-account-name" type="text" placeholder="Account holder" />
+            <input id="cfg-bank-account-name" type="text" placeholder="Account holder" x-model="config.bank.account_name" />
           </div>
           <div class="row">
             <label>IBAN</label>
-            <input id="cfg-bank-iban" type="text" placeholder="NL.. .." />
+            <input id="cfg-bank-iban" type="text" placeholder="NL.. .." x-model="ibanInput" />
           </div>
         </div>
       </details>
@@ -379,18 +424,18 @@
         <summary>Dates</summary>
         <div class="details-content">
           <div class="row">
-            <label class="checkbox"><input id="cfg-show-date" type="checkbox" /> Show Date</label>
+            <label class="checkbox"><input id="cfg-show-date" type="checkbox" x-model="config.date_settings.show_date" /> Show Date</label>
           </div>
           <div class="row">
             <label>Date Format</label>
-            <input id="cfg-date-format" type="text" placeholder="%Y-%m-%d" />
+            <input id="cfg-date-format" type="text" placeholder="%Y-%m-%d" x-model="config.date_settings.date_format" />
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-show-due-date" type="checkbox" /> Show Due Date</label>
+            <label class="checkbox"><input id="cfg-show-due-date" type="checkbox" x-model="config.date_settings.show_due_date" /> Show Due Date</label>
           </div>
           <div class="row">
             <label>Due Date Format</label>
-            <input id="cfg-due-date-format" type="text" placeholder="%Y-%m-%d" />
+            <input id="cfg-due-date-format" type="text" placeholder="%Y-%m-%d" x-model="config.date_settings.due_date_format" />
           </div>
         </div>
       </details>
@@ -399,31 +444,31 @@
         <summary>Columns</summary>
         <div class="details-content">
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-date" type="checkbox" /> Show Date Column</label>
+            <label class="checkbox"><input id="cfg-col-show-date" type="checkbox" x-model="config.column_settings.show_date" /> Show Date Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-description" type="checkbox" /> Show Description Column</label>
+            <label class="checkbox"><input id="cfg-col-show-description" type="checkbox" x-model="config.column_settings.show_description" /> Show Description Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-action" type="checkbox" /> Show Action Column</label>
+            <label class="checkbox"><input id="cfg-col-show-action" type="checkbox" x-model="config.column_settings.show_action" /> Show Action Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-quantity" type="checkbox" /> Show Quantity Column</label>
+            <label class="checkbox"><input id="cfg-col-show-quantity" type="checkbox" x-model="config.column_settings.show_quantity" /> Show Quantity Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-price" type="checkbox" /> Show Price Column</label>
+            <label class="checkbox"><input id="cfg-col-show-price" type="checkbox" x-model="config.column_settings.show_price" /> Show Price Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-discount" type="checkbox" /> Show Discount Column</label>
+            <label class="checkbox"><input id="cfg-col-show-discount" type="checkbox" x-model="config.column_settings.show_discount" /> Show Discount Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-taxable" type="checkbox" /> Show Taxable Column</label>
+            <label class="checkbox"><input id="cfg-col-show-taxable" type="checkbox" x-model="config.column_settings.show_taxable" /> Show Taxable Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-tax-amount" type="checkbox" /> Show Tax Amount Column</label>
+            <label class="checkbox"><input id="cfg-col-show-tax-amount" type="checkbox" x-model="config.column_settings.show_tax_amount" /> Show Tax Amount Column</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-col-show-total" type="checkbox" /> Show Total Column</label>
+            <label class="checkbox"><input id="cfg-col-show-total" type="checkbox" x-model="config.column_settings.show_total" /> Show Total Column</label>
           </div>
         </div>
       </details>
@@ -432,45 +477,49 @@
         <summary>Summary</summary>
         <div class="details-content">
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-net-price" type="checkbox" /> Show Net Price Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-net-price" type="checkbox" x-model="config.summary_settings.show_net_price" /> Show Net Price Row</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-tax" type="checkbox" /> Show Tax Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-tax" type="checkbox" x-model="config.summary_settings.show_tax" /> Show Tax Row</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-total-price" type="checkbox" /> Show Total Price Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-total-price" type="checkbox" x-model="config.summary_settings.show_total_price" /> Show Total Price Row</label>
           </div>
           <div class="row">
-            <label class="checkbox"><input id="cfg-summary-show-amount-due" type="checkbox" /> Show Amount Due Row</label>
+            <label class="checkbox"><input id="cfg-summary-show-amount-due" type="checkbox" x-model="config.summary_settings.show_amount_due" /> Show Amount Due Row</label>
           </div>
         </div>
       </details>
+      </div>
+      </template>
       
       <div class="toolbar">
-        <button class="btn small" id="cfg-save">Save</button>
-        <button class="btn ghost small" id="cfg-cancel">Cancel</button>
+        <button class="btn small" id="cfg-save" @click="saveConfig()">Save</button>
+        <button class="btn ghost small" id="cfg-cancel" @click="closeConfig()">Cancel</button>
       </div>
     </div>
   </div>
 
   <!-- Edit Input Modal -->
-  <div id="edit-modal" class="modal hidden">
-    <div class="modal-backdrop"></div>
+  <div id="edit-modal" class="modal" x-show="showEditModal" style="display: none;">
+    <div class="modal-backdrop" @click="closeEdit()"></div>
     <div class="modal-content" style="max-width: 900px;">
       <h2>Edit Invoice Data</h2>
       
+      <template x-if="editingData">
+      <div>
       <div class="config-section">
         <div class="row">
             <label>Invoice Number</label>
-            <input id="edit-invoice-number" type="text" />
+            <input id="edit-invoice-number" type="text" x-model="editingData.invoice_number" />
         </div>
         <div class="row">
             <label>Date</label>
-            <input id="edit-date" type="text" />
+            <input id="edit-date" type="text" x-model="editingData.date" />
         </div>
         <div class="row">
             <label>Due Date</label>
-            <input id="edit-due-date" type="text" />
+            <input id="edit-due-date" type="text" x-model="editingData.due_date" />
         </div>
       </div>
 
@@ -479,22 +528,22 @@
             <h3>Client</h3>
             <div class="row" style="grid-template-columns: 1fr;">
                 <label>Name (HTML)</label>
-                <textarea id="edit-client-name" style="min-height: 40px;"></textarea>
+                <textarea id="edit-client-name" style="min-height: 40px;" x-model="editingData.client_name_html"></textarea>
             </div>
             <div class="row" style="grid-template-columns: 1fr;">
                 <label>Address (HTML)</label>
-                <textarea id="edit-client-address"></textarea>
+                <textarea id="edit-client-address" x-model="editingData.client_address_html"></textarea>
             </div>
         </div>
         <div class="config-section" style="flex: 1;">
             <h3>Company</h3>
             <div class="row" style="grid-template-columns: 1fr;">
                 <label>Name (HTML)</label>
-                <textarea id="edit-company-name" style="min-height: 40px;"></textarea>
+                <textarea id="edit-company-name" style="min-height: 40px;" x-model="editingData.company_name_html"></textarea>
             </div>
             <div class="row" style="grid-template-columns: 1fr;">
                 <label>Address (HTML)</label>
-                <textarea id="edit-company-address"></textarea>
+                <textarea id="edit-company-address" x-model="editingData.company_address_html"></textarea>
             </div>
         </div>
       </div>
@@ -515,12 +564,25 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <!-- Items go here -->
+                        <template x-for="(item, index) in editingData.items" :key="index">
+                        <tr>
+                            <td><input type="text" class="edit-item-date" x-model="item.date" style="width: 100%"></td>
+                            <td><input type="text" class="edit-item-desc" x-model="item.description" style="width: 100%"></td>
+                            <td><input type="text" class="edit-item-qty" x-model="item.quantity" style="width: 60px"></td>
+                            <td><input type="text" class="edit-item-price" x-model="item.unit_price" style="width: 80px"></td>
+                            <td><input type="text" class="edit-item-total" x-model="item.total" style="width: 80px"></td>
+                            <td style="text-align: center;">
+                                <button class="btn ghost icon-only bad delete-item" @click="removeEditItem(index)" title="Remove Item">
+                                    <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                                </button>
+                            </td>
+                        </tr>
+                        </template>
                     </tbody>
                 </table>
             </div>
             <div style="padding: 10px;">
-                <button class="btn ghost small" id="btn-add-item">+ Add Item</button>
+                <button class="btn ghost small" id="btn-add-item" @click="addEditItem()">+ Add Item</button>
             </div>
         </div>
       </details>
@@ -530,33 +592,37 @@
         <div class="details-content">
             <div class="row">
                 <label>Net Price</label>
-                <input id="edit-summary-net" type="text" />
+                <input id="edit-summary-net" type="text" x-model="editingData.summary.net" />
             </div>
             <div class="row">
                 <label>Tax</label>
-                <input id="edit-summary-tax" type="text" />
+                <input id="edit-summary-tax" type="text" x-model="editingData.summary.tax" />
             </div>
             <div class="row">
                 <label>Total Price</label>
-                <input id="edit-summary-total" type="text" />
+                <input id="edit-summary-total" type="text" x-model="editingData.summary.total" />
             </div>
             <div class="row">
                 <label>Amount Due</label>
-                <input id="edit-summary-due" type="text" />
+                <input id="edit-summary-due" type="text" x-model="editingData.summary.due" />
             </div>
         </div>
       </details>
+      </div>
+      </template>
 
       <div class="toolbar">
-        <button class="btn small" id="edit-save">Save</button>
-        <button class="btn ghost small" id="edit-cancel">Cancel</button>
-        <button class="btn ghost bad small" id="edit-reset" style="margin-left: auto;">Reset</button>
+        <button class="btn small" id="edit-save" @click="saveEdit()">Save</button>
+        <button class="btn ghost small" id="edit-cancel" @click="closeEdit()">Cancel</button>
+        <button class="btn ghost bad small" id="edit-reset" style="margin-left: auto;" @click="resetEdit()">Reset</button>
       </div>
     </div>
   </div>
 
-  <script src="jspdf.umd.min.js"></script>
-  <script src="html2canvas.min.js"></script>
-  <script src="app.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas-pro@1.5.13/dist/html2canvas-pro.min.js"></script>
+  <script src="src/ui.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>
