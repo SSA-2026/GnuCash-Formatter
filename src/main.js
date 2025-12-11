@@ -402,7 +402,15 @@ async function convertFiles(selectedOnly = false) {
             // Generate PDF
             if (generatePdf) {
                 try {
-                    const pdfBlob = await generatePdfFromHtml(improvedHtml, baseFilename + '.pdf');
+                    // Get PDF quality settings from UI
+                    const pdfQualityOptions = {
+                        quality: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfQuality : 1.0,
+                        scale: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfScale : 3.0,
+                        format: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfFormat : 'jpeg',
+                        compress: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfCompress : true
+                    };
+                    
+                    const pdfBlob = await generatePdfFromHtml(improvedHtml, baseFilename + '.pdf', pdfQualityOptions);
                     const pdfFileObj = {
                         id: Date.now() + Math.random() + '_' + baseFilename + '.pdf',
                         name: baseFilename + '.pdf',
@@ -847,15 +855,7 @@ function wireEvents() {
         btnClearFolder.addEventListener("click", clearProjectFolder);
     }
     
-    const btnConvertAll = el("#btn-convert-all");
-    if (btnConvertAll) {
-        btnConvertAll.addEventListener("click", () => convertFiles(false));
-    }
-    
-    const btnConvert = el("#btn-convert");
-    if (btnConvert) {
-        btnConvert.addEventListener("click", () => convertFiles(true));
-    }
+    // Convert buttons are now handled by the Alpine dropdown
     
     const btnClearSelectedInputs = el("#btn-clear-selected-inputs");
     if (btnClearSelectedInputs) {

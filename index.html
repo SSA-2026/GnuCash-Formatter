@@ -138,6 +138,41 @@
     .dropdown-content label:hover { background-color: rgba(128,128,128,0.1); }
     .dropdown.show .dropdown-content { display: block; }
     
+    /* Enhanced dropdown for convert options */
+    .dropdown-content input[type="range"] {
+      height: 20px;
+      background: transparent;
+      cursor: pointer;
+    }
+    .dropdown-content input[type="range"]::-webkit-slider-track {
+      background: var(--border);
+      height: 3px;
+      border-radius: 2px;
+    }
+    .dropdown-content input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+      margin-top: -4.5px;
+    }
+    .dropdown-content input[type="range"]::-moz-range-track {
+      background: var(--border);
+      height: 3px;
+      border-radius: 2px;
+    }
+    .dropdown-content input[type="range"]::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+    
     /* Drag Overlay */
     #drag-overlay {
         position: fixed; inset: 0; background: rgba(28, 126, 214, 0.9); z-index: 2000;
@@ -198,16 +233,90 @@
                 <button class="tab" :class="{ 'active': activeTab === 'outputs' }" @click="activeTab = 'outputs'">Output Files <span id="count-outputs" class="pill" x-text="outputCount">0</span></button>
             </div>
             <div class="toolbar">
-                <button class="btn warn small" id="btn-convert-all">Convert All</button>
-                <button class="btn good small" id="btn-convert">Convert Selected</button>
-                <div class="dropdown" :class="{ 'show': showOptions }" @click.outside="showOptions = false">
-                  <button class="btn ghost small" @click="showOptions = !showOptions">Options</button>
-                  <div class="dropdown-content">
-                    <label class="checkbox"><input type="checkbox" x-model="conversionOptions.overwrite" /> Overwrite existing files</label>
-                    <label class="checkbox"><input type="checkbox" x-model="conversionOptions.keepHtml" /> Keep improved HTML</label>
-                    <label class="checkbox"><input type="checkbox" x-model="conversionOptions.debug" /> Debug mode</label>
+                <!-- Enhanced Convert Dropdown -->
+                <div class="dropdown" :class="{ 'show': showConvertOptions }" @click.outside="showConvertOptions = false">
+                  <button class="btn warn small" @click="openConvertOptions()">
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    Convert
+                  </button>
+                  <div class="dropdown-content" style="min-width: 280px; padding: 12px;">
+                    <!-- Convert Actions -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+                      <button class="btn small good" @click="convertFiles(false); showConvertOptions = false;">
+                        Convert All
+                      </button>
+                      <button class="btn small" @click="convertFiles(true); showConvertOptions = false;">
+                        Convert Selected
+                      </button>
+                    </div>
+                    
+                    <!-- Quick Presets -->
+                    <div style="margin-bottom: 12px;">
+                      <div style="font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 6px;">Quick Presets</div>
+                      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+                        <button class="btn ghost small"
+                                @click="applyPdfPreset('high')"
+                                :class="{ 'btn': true, 'small': true, 'ghost': !isCurrentPreset('high'), 'warn': isCurrentPreset('high') }"
+                                style="font-size: 11px; padding: 4px 8px;">
+                          High
+                        </button>
+                        <button class="btn ghost small"
+                                @click="applyPdfPreset('default')"
+                                :class="{ 'btn': true, 'small': true, 'ghost': !isCurrentPreset('default'), 'good': isCurrentPreset('default') }"
+                                style="font-size: 11px; padding: 4px 8px;">
+                          Default
+                        </button>
+                        <button class="btn ghost small"
+                                @click="applyPdfPreset('low')"
+                                :class="{ 'btn': true, 'small': true, 'ghost': !isCurrentPreset('low'), 'bad': isCurrentPreset('low') }"
+                                style="font-size: 11px; padding: 4px 8px;">
+                          Low
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <!-- PDF Quality Settings -->
+                    <div style="border-top: 1px solid var(--border); padding-top: 12px;">
+                      <div style="font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 8px;">PDF Quality</div>
+                      
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                        <div>
+                          <label style="font-size: 11px; display: block; margin-bottom: 2px;">Quality: <span x-text="Math.round(conversionOptions.pdfQuality * 100) + '%'"></span></label>
+                          <input type="range" min="0.1" max="1" step="0.1" x-model="conversionOptions.pdfQuality" @input="updateCurrentPreset()" style="width: 100%;" />
+                        </div>
+                        <div>
+                          <label style="font-size: 11px; display: block; margin-bottom: 2px;">Scale: <span x-text="conversionOptions.pdfScale + 'x'"></span></label>
+                          <input type="range" min="1" max="5" step="0.5" x-model="conversionOptions.pdfScale" @input="updateCurrentPreset()" style="width: 100%;" />
+                        </div>
+                      </div>
+                      
+                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                        <div>
+                          <label style="font-size: 11px; display: block; margin-bottom: 2px;">Format</label>
+                          <select x-model="conversionOptions.pdfFormat" @change="updateCurrentPreset()" style="width: 100%; padding: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 4px; font-size: 11px;">
+                            <option value="jpeg">JPEG</option>
+                            <option value="png">PNG</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style="font-size: 11px; display: block; margin-bottom: 2px;">Est. Size</label>
+                          <div style="padding: 2px; background: rgba(128,128,128,0.1); border-radius: 4px; font-size: 11px; text-align: center; cursor: help;"
+                               :title="getSizeEstimateDetails()" x-text="getEstimatedSize()"></div>
+                        </div>
+                      </div>
+                      
+                      <label class="checkbox" style="font-size: 11px;"><input type="checkbox" x-model="conversionOptions.pdfCompress" @change="updateCurrentPreset()" /> PDF compression</label>
+                    </div>
+                    
+                    <!-- Other Options -->
+                    <div style="border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px;">
+                      <label class="checkbox" style="font-size: 11px;"><input type="checkbox" x-model="conversionOptions.overwrite" /> Overwrite existing files</label>
+                      <label class="checkbox" style="font-size: 11px;"><input type="checkbox" x-model="conversionOptions.keepHtml" /> Keep improved HTML</label>
+                      <label class="checkbox" style="font-size: 11px;"><input type="checkbox" x-model="conversionOptions.debug" /> Debug mode</label>
+                    </div>
                   </div>
                 </div>
+                
                 <button class="btn small" @click="openConfig()">Config</button>
             </div>
         </div>
