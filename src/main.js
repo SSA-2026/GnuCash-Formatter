@@ -7,7 +7,7 @@ import {
 } from './storage.js';
 import { parseEasyInvoice } from './parser.js';
 import { buildImprovedHtml } from './generator.js';
-import { generatePdfFromHtml } from './pdf.js';
+import { generatePdfFromData } from './pdf.js';
 
 // --- Main Application Logic ---
 
@@ -91,7 +91,7 @@ async function init() {
 
     renderInputs({
         onPreviewInput: previewInputFile,
-        onEditInput: openEditModal
+        onShowInfo: showDetectedFieldsInfo
     });
     renderOutputs({
         onPreviewOutput: previewOutputFile,
@@ -399,18 +399,10 @@ async function convertFiles(selectedOnly = false) {
                 saveToOutputFolder(improvedHtml, htmlFileObj.name);
             }
             
-            // Generate PDF
+            // Generate PDF using pdfmake (with selectable text)
             if (generatePdf) {
                 try {
-                    // Get PDF quality settings from UI
-                    const pdfQualityOptions = {
-                        quality: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfQuality : 1.0,
-                        scale: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfScale : 3.0,
-                        format: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfFormat : 'jpeg',
-                        compress: window.AlpineStore ? window.AlpineStore.conversionOptions.pdfCompress : true
-                    };
-                    
-                    const pdfBlob = await generatePdfFromHtml(improvedHtml, baseFilename + '.pdf', pdfQualityOptions);
+                    const pdfBlob = await generatePdfFromData(data, STATE.config, STATE.ibanConfig, baseFilename + '.pdf');
                     const pdfFileObj = {
                         id: Date.now() + Math.random() + '_' + baseFilename + '.pdf',
                         name: baseFilename + '.pdf',
@@ -636,6 +628,75 @@ async function previewInputFile(fileObj) {
     } catch (e) {
         console.error("Failed to preview file", e);
         toast("Failed to preview file", "bad");
+    }
+}
+
+async function showDetectedFieldsInfo(fileObj) {
+    try {
+        // Parse the file to get detected fields
+        const html = await fileObj.file.text();
+        const data = parseEasyInvoice(html);
+        
+        // Build HTML content for modal
+        let content = `<div style="font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.6;">`;
+        
+        // Detected Columns
+        content += `<div style="margin-bottom: 16px;">
+            <div style="font-weight: 600; color: var(--accent); margin-bottom: 8px;">📋 Detected Columns</div>
+            <div style="background: rgba(128,128,128,0.1); padding: 10px; border-radius: 6px;">`;
+        if (data.detectedColumns && data.detectedColumns.length > 0) {
+            content += data.detectedColumns.map(col => 
+                `<span style="display: inline-block; background: var(--accent); color: white; padding: 2px 8px; border-radius: 4px; margin: 2px; font-size: 12px;">${col.label}</span>`
+            ).join('');
+        } else {
+            content += `<span style="color: var(--muted);">(none detected)</span>`;
+        }
+        content += `</div></div>`;
+        
+        // Invoice Info
+        content += `<div style="margin-bottom: 16px;">
+            <div style="font-weight: 600; color: var(--accent); margin-bottom: 8px;">📝 Invoice Info</div>
+            <table style="width: 100%; font-size: 13px;">
+                <tr><td style="padding: 4px 0; color: var(--muted);">Invoice #</td><td style="padding: 4px 0; font-weight: 500;">${data.invoice_number || '(not found)'}</td></tr>
+                <tr><td style="padding: 4px 0; color: var(--muted);">Date</td><td style="padding: 4px 0;">${data.date || '(not found)'}</td></tr>
+                <tr><td style="padding: 4px 0; color: var(--muted);">Due Date</td><td style="padding: 4px 0;">${data.due_date || '(not found)'}</td></tr>
+            </table>
+        </div>`;
+        
+        // Client & Company
+        content += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <div>
+                <div style="font-weight: 600; color: var(--accent); margin-bottom: 4px;">👥 Client</div>
+                <div style="font-size: 13px;">${stripTags(data.client_name_html) || '(not found)'}</div>
+            </div>
+            <div>
+                <div style="font-weight: 600; color: var(--accent); margin-bottom: 4px;">🏢 Company</div>
+                <div style="font-size: 13px;">${stripTags(data.company_name_html) || '(not found)'}</div>
+            </div>
+        </div>`;
+        
+        // Items & Summary
+        content += `<div style="margin-bottom: 16px;">
+            <div style="font-weight: 600; color: var(--accent); margin-bottom: 8px;">📊 Items & Summary</div>
+            <div style="font-size: 13px;">
+                <div style="margin-bottom: 8px;"><strong>${data.items?.length || 0}</strong> item row(s)</div>`;
+        if (data.summary?.net) content += `<div>✓ Net Price: ${data.summary.net}</div>`;
+        if (data.summary?.tax) content += `<div>✓ Tax: ${data.summary.tax}</div>`;
+        if (data.summary?.total) content += `<div>✓ Total: ${data.summary.total}</div>`;
+        if (data.summary?.due) content += `<div style="font-weight: 600; color: var(--accent);">✓ Amount Due: ${data.summary.due}</div>`;
+        content += `</div></div>`;
+        
+        content += `</div>`;
+        
+        // Show modal
+        const modal = document.getElementById('info-modal');
+        document.getElementById('info-modal-title').textContent = `Detected Fields: ${fileObj.name}`;
+        document.getElementById('info-modal-content').innerHTML = content;
+        modal.style.display = 'flex';
+        
+    } catch (e) {
+        console.error("Failed to parse file for info:", e);
+        toast("Failed to analyze file", "bad");
     }
 }
 
